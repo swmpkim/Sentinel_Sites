@@ -13,3 +13,6 @@ QCd data workup/*
 Templates/*
 R output/*
 *.accdb
+sets.group.R
+SET_processing.R
+SET_summarizing.R
