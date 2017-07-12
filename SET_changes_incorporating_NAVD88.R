@@ -180,7 +180,7 @@ dev.off()
 # facet, including all 3 platforms from each site
 pin_change2 <- filter(pin_change, site != "CLMA")
 
-png("SET elevations faceted no CLMAJ with MLW and MSL.png", width=8, height=5, res=300, units="in")
+png("SET elevations faceted no CLMAJ with MLW and MSL", width=8, height=5, res=300, units="in")
 ggplot(pin_change2, aes(x=date, y=meanadj)) +
     geom_point(aes(col=site), alpha=0.3, size=2) +
     facet_wrap(~site, nrow=2) +
@@ -193,3 +193,67 @@ ggplot(pin_change2, aes(x=date, y=meanadj)) +
     ylab("elevation (m)") +
     ylim(0, 0.35)
 dev.off() 
+
+
+
+########
+# insert a geom_ribbon to color in the space below mean sea level
+########
+
+png("SET elevations faceted no CLMAJ with MLW and MSL and shading.png", width=8, height=5, res=300, units="in")
+ggplot(pin_change2, aes(x=date, y=meanadj)) +
+    geom_ribbon(aes(ymin=0, ymax=slr_slope*as.integer(date) + slr_int), fill="azure2") +
+    geom_point(aes(col=site), alpha=0.5, size=2) +
+    facet_wrap(~site, nrow=2) +
+    geom_smooth(method="lm", aes(col=site), lwd=1) +
+    theme_minimal() +
+    geom_abline(aes(slope = slr_slope, intercept = slr_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mhw_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mlw_int), col="blue", lty=2) +
+    ggtitle("SETS through time relative to NAVD88") +
+    ylab("elevation (m)") +
+    ylim(0, 0.35)
+dev.off() 
+
+
+
+library(RColorBrewer)
+colors <- brewer.pal(3, "Blues")
+# mlwline = slr_slope*as.integer(date) + mlw_int
+# mswline = slr_slope*as.integer(date) + slr_int
+# mhwline = slr_slope*as.integer(date) + mhw_int
+
+png("SET elevations by site with MLW and MSL and more shading.png", width=5, height=5, res=300, units="in")
+ggplot(pins_bysite, aes(x=date, y=pin_ht_adj)) +
+    geom_ribbon(aes(ymin=0, ymax=slr_slope*as.integer(date) + mlw_int), fill=colors[3]) +
+    geom_ribbon(aes(ymin=slr_slope*as.integer(date) + mlw_int, ymax=slr_slope*as.integer(date) + slr_int), fill=colors[2], alpha=0.5) +
+    geom_ribbon(aes(ymin=slr_slope*as.integer(date) + slr_int, ymax=slr_slope*as.integer(date) + mhw_int), fill=colors[1], alpha=0.5) +
+    geom_abline(aes(slope = slr_slope, intercept = slr_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mhw_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mlw_int), col="blue", lty=2) +
+    geom_point(aes(col=site), alpha=0.7, size=2) +
+    geom_smooth(method="lm", aes(group=site, col=site)) +
+    theme_minimal() +
+    ggtitle("SETS through time relative to NAVD88") +
+    ylab("elevation (m)") +
+    ylim(0, 0.8)
+dev.off()    
+
+
+
+png("SET elevations by site no CLMAJ with MLW and MSL and more shading.png", width=5, height=5, res=300, units="in")
+ggplot(pins_bysite, aes(x=date, y=pin_ht_adj)) +
+    geom_ribbon(aes(ymin=0, ymax=slr_slope*as.integer(date) + mlw_int), fill=colors[3]) +
+    geom_ribbon(aes(ymin=slr_slope*as.integer(date) + mlw_int, ymax=slr_slope*as.integer(date) + slr_int), fill=colors[2], alpha=0.5) +
+    geom_ribbon(aes(ymin=slr_slope*as.integer(date) + slr_int, ymax=0.35), fill=colors[1], alpha=0.5) +
+    geom_abline(aes(slope = slr_slope, intercept = slr_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mhw_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mlw_int), col="blue", lty=2) +
+    geom_point(aes(col=site), alpha=0.7, size=2) +
+    geom_smooth(method="lm", aes(group=site, col=site)) +
+    theme_minimal() +
+    ggtitle("SETS through time relative to NAVD88") +
+    ylab("elevation (m)") +
+    ylim(0, 0.35)
+dev.off()
+
