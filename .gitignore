@@ -1,0 +1,15 @@
+*.pdf
+*.jpeg
+*.png
+*.csv
+*.xlsx
+*.doc
+almost all qcd data-panne uncorrected/*
+Lindsay's Procedure docs/*
+non-QCd data workup - practice/*
+non-R/*
+Other reserve data/*
+QCd data workup/*
+Templates/*
+R output/*
+*.accdb
