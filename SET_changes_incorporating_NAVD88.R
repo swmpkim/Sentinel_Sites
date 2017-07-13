@@ -19,7 +19,10 @@ load("sets.group.R")
 # In the Excel spreadsheet, the calculation involved "SET_NAVD88 + Adapter_NAVD88 - 0.756", all subtracted from the original average of pin readings
 # I don't know why 
 NAVD88 <- read.csv("NAVD88.csv")
-NAVD88 <- mutate(NAVD88, totalfactor = SET_NAVD88 - Adapter_NAVD88)
+NAVD88 <- mutate(NAVD88, totalfactor = SET_NAVD88 - Adapter_NAVD88,
+                 factor2 = SET_NAVD88 - (0.756-Adapter_NAVD88))
+
+### i think the second one might be right IF the pins are 0.756m long, which is a constant I saw in the Excel spreadsheet. factor2 will flow into navdadj2, meanadj2, and some graphs below.
 
 
 # subtract first reading at a platform from all subsequent readings
@@ -44,11 +47,13 @@ pin_change$site <- factor(pin_change$site, levels = c("CLMA", "PANN", "UPJU", "L
 # add NAVD88 adjustment to pin_change data frame by matching value from NAVD88 data frame 
 # https://stackoverflow.com/questions/13492161/r-add-values-to-data-frame-matching-a-certain-criteria
 pin_change$navdadj <- NAVD88$totalfactor[match(pin_change$site.platform, NAVD88$Site)]
+pin_change$navdadj2 <- NAVD88$factor2[match(pin_change$site.platform, NAVD88$Site)]
 
 
 # make the new column
 # BEWARE - the units are different. turn this all into meters.
-pin_change <- mutate(pin_change, meanadj = (mean/1000) + navdadj)
+pin_change <- mutate(pin_change, meanadj = (mean/1000) + navdadj,
+                     meanadj2 = (mean/1000) + navdadj2)
 
 
 # big scatter plot of all sites
@@ -109,7 +114,8 @@ dev.off()
 pins_bysite <- pin_change %>%
     group_by(site, date) %>%
     summarize(pin_ht_raw = mean(mean, na.rm=TRUE),
-              pin_ht_adj = mean(meanadj, na.rm=TRUE))
+              pin_ht_adj = mean(meanadj, na.rm=TRUE),
+              pin_ht_adj2 = mean(meanadj2, na.rm=TRUE))
 
 ############
 # NOTE: I'm assuming these slopes are similar to the ones spit out from non-averaged data, but have NOT verified it
@@ -257,3 +263,52 @@ ggplot(pins_bysite, aes(x=date, y=pin_ht_adj)) +
     ylim(0, 0.35)
 dev.off()
 
+
+
+##### using second calculation, which is possibly more accurate:
+ggplot(pin_change, aes(x=date, y=meanadj2)) +
+    geom_ribbon(aes(ymin=0, ymax=slr_slope*as.integer(date) + mlw_int), fill=colors[3]) +
+    geom_ribbon(aes(ymin=slr_slope*as.integer(date) + mlw_int, ymax=slr_slope*as.integer(date) + slr_int), fill=colors[2], alpha=0.5) +
+    geom_ribbon(aes(ymin=slr_slope*as.integer(date) + slr_int, ymax=slr_slope*as.integer(date) + mhw_int), fill=colors[1], alpha=0.5) +
+    geom_abline(aes(slope = slr_slope, intercept = slr_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mhw_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mlw_int), col="blue", lty=2) +
+    geom_point(aes(col=site), alpha=0.7, size=2) +
+    geom_smooth(method="lm", aes(group=site, col=site)) +
+    theme_minimal() +
+    ggtitle("SETS through time relative to NAVD88") +
+    ylab("elevation (m)") +
+    ylim(0, 0.8)
+
+png("updated SET elevations by site with sea level shading.png", width=4.5, height=5, res=300, units="in")
+ggplot(pins_bysite, aes(x=date, y=pin_ht_adj2)) +
+    geom_ribbon(aes(ymin=0, ymax=slr_slope*as.integer(date) + mlw_int), fill=colors[3]) +
+    geom_ribbon(aes(ymin=slr_slope*as.integer(date) + mlw_int, ymax=slr_slope*as.integer(date) + slr_int), fill=colors[2], alpha=0.5) +
+    geom_ribbon(aes(ymin=slr_slope*as.integer(date) + slr_int, ymax=slr_slope*as.integer(date) + mhw_int), fill=colors[1], alpha=0.5) +
+    geom_abline(aes(slope = slr_slope, intercept = slr_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mhw_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mlw_int), col="blue", lty=2) +
+    geom_smooth(method="lm", aes(group=site, col=site), lwd=1.2) +
+    geom_point(aes(col=site), alpha=0.7, size=3) +
+    theme_minimal() +
+    ggtitle("SETS through time relative to NAVD88") +
+    ylab("elevation (m)") +
+    ylim(0, 0.8)
+dev.off()
+
+
+png("updated SET elevations by site no CLMAJ with sea level shading.png", width=5, height=5, res=300, units="in")
+ggplot(pins_bysite, aes(x=date, y=pin_ht_adj2)) +
+    geom_ribbon(aes(ymin=0, ymax=slr_slope*as.integer(date) + mlw_int), fill=colors[3]) +
+    geom_ribbon(aes(ymin=slr_slope*as.integer(date) + mlw_int, ymax=slr_slope*as.integer(date) + slr_int), fill=colors[2], alpha=0.5) +
+    geom_ribbon(aes(ymin=slr_slope*as.integer(date) + slr_int, ymax=0.4), fill=colors[1], alpha=0.5) +
+    geom_abline(aes(slope = slr_slope, intercept = slr_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mhw_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mlw_int), col="blue", lty=2) +
+    geom_smooth(method="lm", aes(group=site, col=site), lwd=1.2) +
+    geom_point(aes(col=site), alpha=0.7, size=3) +
+    theme_minimal() +
+    ggtitle("SETS through time relative to NAVD88") +
+    ylab("elevation (m)") +
+    ylim(0, 0.4)
+dev.off()
