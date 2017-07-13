@@ -20,9 +20,11 @@ load("sets.group.R")
 # I don't know why 
 NAVD88 <- read.csv("NAVD88.csv")
 NAVD88 <- mutate(NAVD88, totalfactor = SET_NAVD88 - Adapter_NAVD88,
-                 factor2 = SET_NAVD88 - (0.756-Adapter_NAVD88))
+                 factor2 = SET_NAVD88 + Adapter_NAVD88 - 0.756)
 
 ### i think the second one might be right IF the pins are 0.756m long, which is a constant I saw in the Excel spreadsheet. factor2 will flow into navdadj2, meanadj2, and some graphs below.
+### total height (set + adapter + reading) - pin length (0.756) = NAVD88 location of marsh surface
+### so add factor 2 to the pin reading.
 
 
 # subtract first reading at a platform from all subsequent readings
