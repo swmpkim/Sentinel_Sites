@@ -263,9 +263,13 @@ ggplot(pins_bysite, aes(x=date, y=pin_ht_adj)) +
     ylim(0, 0.35)
 dev.off()
 
-
-
+########################
+########################
+# UPDATED PLOTS
+########################
+########################
 ##### using second calculation, which is possibly more accurate:
+
 ggplot(pin_change, aes(x=date, y=meanadj2)) +
     geom_ribbon(aes(ymin=0, ymax=slr_slope*as.integer(date) + mlw_int), fill=colors[3]) +
     geom_ribbon(aes(ymin=slr_slope*as.integer(date) + mlw_int, ymax=slr_slope*as.integer(date) + slr_int), fill=colors[2], alpha=0.5) +
@@ -279,6 +283,25 @@ ggplot(pin_change, aes(x=date, y=meanadj2)) +
     ggtitle("SETS through time relative to NAVD88") +
     ylab("elevation (m)") +
     ylim(0, 0.8)
+
+
+png("updated SET elevations faceted by site no CLMAJ with sea level shading.png", width=6, height=5, res=300, units="in")
+ggplot(pin_change2, aes(x=date, y=meanadj2)) +
+    geom_ribbon(aes(ymin=0, ymax=slr_slope*as.integer(date) + mlw_int), fill=colors[3]) +
+    geom_ribbon(aes(ymin=slr_slope*as.integer(date) + mlw_int, ymax=slr_slope*as.integer(date) + slr_int), fill=colors[2], alpha=0.5) +
+    geom_ribbon(aes(ymin=slr_slope*as.integer(date) + slr_int, ymax=0.4), fill=colors[1], alpha=0.5) +
+    geom_abline(aes(slope = slr_slope, intercept = slr_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mhw_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mlw_int), col="blue", lty=2) +
+    geom_smooth(method="lm", aes(group=site, col=site)) +
+    geom_point(aes(col=site), alpha=0.6, size=1.7) +
+    theme_minimal() +
+    facet_wrap(~site, nrow=2) +
+    ggtitle("SETS through time relative to NAVD88") +
+    ylab("elevation (m)") +
+    ylim(0, 0.4)
+dev.off()
+
 
 png("updated SET elevations by site with sea level shading.png", width=4.5, height=5, res=300, units="in")
 ggplot(pins_bysite, aes(x=date, y=pin_ht_adj2)) +
