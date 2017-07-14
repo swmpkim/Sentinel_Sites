@@ -5,7 +5,7 @@ library(ggplot2)
 library(broom)
 
 
-# setwd("C:/Users/kimberly.cressman/Desktop/Main Docs/Sentinel_Sites")
+setwd("C:/Users/kimberly.cressman/Desktop/Main Docs/Sentinel_Sites")
 
 # load group of files, generated from SET_summarizing.R
 load("sets.group.R")
@@ -27,6 +27,9 @@ lower <- c("JURO-1", "JURO-2", "JURO-3")
 pin_change$site[pin_change$site.platform %in% upper] <- "UPJU"
 pin_change$site[pin_change$site.platform %in% lower] <- "LOJU"
 
+change_bysite <- pin_change %>%
+    group_by(site, date) %>%
+    summarize(change = mean(change, na.rm=TRUE))
 
 # big scatter plot of all sites
 ggplot(pin_change, aes(x=date, y=change)) +
@@ -77,9 +80,10 @@ ggplot(pin_change, aes(x=date, y=change)) +
 dev.off()
 
 
-
+################################
 # generate linear regression for each site.platform
 # not very readable but it works
+################################
 
 # slope is per day because of how R sees dates
 # based on: https://stackoverflow.com/questions/22713325/fitting-several-regression-models-with-dplyr
@@ -98,63 +102,63 @@ modelcoef$conf.high.yr <- ifelse(modelcoef$term == "date", round((modelcoef$conf
 
 modelsummary <- glance(models, mod) # this gives r^2 and adjusted r^2, and p values, among others
 
-write.csv(modelsummary, "modelsummary_by_site-platform.csv", row.names=FALSE)
-write.csv(modelcoef, "modelcoef_by_site-platform.csv", row.names=FALSE)
+# write.csv(modelsummary, "modelsummary_by_site-platform.csv", row.names=FALSE)
+# write.csv(modelcoef, "modelcoef_by_site-platform.csv", row.names=FALSE)
 
 
-
-# now instead of by site.platform, do it by site (n=3 within each site)
-# generate linear regression for each site.platform
-# not very readable but it works
-# slope is per day because of how R sees dates
-# based on: https://stackoverflow.com/questions/22713325/fitting-several-regression-models-with-dplyr
+#######################################
+# regressions by site instead of by site.platform (n=3 within each site)
+#######################################
 models <- pin_change %>%
     group_by(site) %>%  
     do(mod = lm(change ~ date, data=.))
 
-modelcoef <- tidy(models, mod, conf.int=TRUE, conf.level=0.95) # this gives the intercept, slope, and p values, among others; conf.int=TRUE, conf.level=0.95 gives the 95% confidence interval
+modelcoefbysite <- tidy(models, mod, conf.int=TRUE, conf.level=0.95) # this gives the intercept, slope, and p values, among others; conf.int=TRUE, conf.level=0.95 gives the 95% confidence interval
 
 # make a slope per year for date estimate; NAs for intercept
-modelcoef$mm.yr <- ifelse(modelcoef$term == "date", round((modelcoef$estimate * 4 * 365 + 1)/4, 3), "NA")
+modelcoefbysite$mm.yr <- ifelse(modelcoefbysite$term == "date", round((modelcoefbysite$estimate * 4 * 365 + 1)/4, 3), "NA")
 
 # confidence intervals in mm/yr:
-modelcoef$conf.low.yr <- ifelse(modelcoef$term == "date", round((modelcoef$conf.low * 4 * 365 + 1)/4, 3), "NA")
-modelcoef$conf.high.yr <- ifelse(modelcoef$term == "date", round((modelcoef$conf.high * 4 * 365 + 1)/4, 3), "NA")
+modelcoefbysite$conf.low.yr <- ifelse(modelcoefbysite$term == "date", round((modelcoefbysite$conf.low * 4 * 365 + 1)/4, 3), "NA")
+modelcoefbysite$conf.high.yr <- ifelse(modelcoefbysite$term == "date", round((modelcoefbysite$conf.high * 4 * 365 + 1)/4, 3), "NA")
 
-modelsummary <- glance(models, mod) # this gives r^2 and adjusted r^2, and p values, among others
+modelsummarybysite <- glance(models, mod) # this gives r^2 and adjusted r^2, and p values, among others
 
-write.csv(modelsummary, "modelsummary_by_site.csv", row.names=FALSE)
-write.csv(modelcoef, "modelcoef_by_site.csv", row.names=FALSE)
-
-
+# write.csv(modelsummary, "modelsummary_by_site.csv", row.names=FALSE)
+# write.csv(modelcoef, "modelcoef_by_site.csv", row.names=FALSE)
 
 
-# this is working
-# test.dat2 <- filter(pin_change, site.platform == "JURO-1")
-# test.mod.2 <- lm(change ~ date, data=test.dat2)
-# summary(test.mod.2)
-# slopeperyear <- (test.mod.2$coefficients[2]*(4*365+1))/4
-# slopeperyear
-# 
-# # residual sum of squares is, from https://stackoverflow.com/questions/15254543/obtain-residual-standard-errors-of-an-mlm-object-returned-by-lm:
-# resSS <- sum(test.mod.2$residuals^2)
-# # not 100% sure this matches the definition of res SS on p. 269 of Zar's Biostatistical Analysis, 2nd ed.
-# # this matches "deviance" in the modelsummary dataframe
-# 
-# confint(test.mod.2, level=0.95) # 95% confidence interval for estimates (date slope)
-# # anova table also gives residual sum of squares:
-# # anova(test.mod.2)
+#########################################
+# make graphs with regression lines generated above
+#########################################
 
-# plot diagnostics
-# layout(matrix(c(1,2,3,4),2,2)) # optional 4 graphs/page 
-# plot(test.mod.2)
+# pull out just intercept and slope from the modelcoefbysite data frame
+regs <- modelcoefbysite %>%
+    select(site, term, estimate) %>%
+    spread(term, estimate)
+names(regs) <- c("site", "intercept", "slope")
+
+png("SET changes by site with regression.png", width=6, height=4.5, res=300, units="in")
+ggplot(change_bysite, aes(x=date, y=change)) +
+    geom_abline(slope = slr_slope, intercept = slr_int, lty=2, lwd=2, alpha=1) +
+    geom_point(aes(col=site), alpha=0.3, size=2) +
+    geom_smooth(method="lm", aes(group=site, color=site), alpha=1, lwd=1.5, se=FALSE) +
+    # geom_abline(slope=regs$slope, intercept=regs$intercept, aes(col=site)) + FORTUNATELY this is the same as geom_smooth in the previous line, and this was generated from the 3-points per site per date data!
+    theme_minimal() +
+    ggtitle("Cumulative Surface Elevation Change") +
+    ylab("change (mm)")
+dev.off()
 
 
-# ggplot(test.dat2, aes(x=date, y=change)) +
-#     geom_abline(slope = slr_slope, intercept = slr_int, lty=1, lwd=1) +
-#     geom_abline(slope = test.mod.2$coefficients[2], intercept = test.mod.2$coefficients[1], lty=2, col="red", lwd=2) +
-#     geom_point(aes(col=site.platform), alpha=0.7, size=3) +
-#     ylim(-40, 45) +
-#     theme_minimal() +
-#     ggtitle("Cumulative Surface Elevation Change") +
-#     ylab("change (mm)")
+png("SET changes by site with SLR line faceted.png", width=5, height=5, res=300, units="in")
+ggplot(change_bysite, aes(x=date, y=change)) +
+    geom_abline(slope = slr_slope, intercept = slr_int, lty=2, lwd=2, alpha=1) +
+    geom_smooth(method="lm", aes(group=site, color=site), alpha=1, lwd=1.5) +
+    geom_point(aes(col=site), alpha=0.3, size=2) +
+    facet_wrap(~site, ncol=2) +
+    # geom_abline(slope=regs$slope, intercept=regs$intercept, aes(col=site)) +
+    theme_minimal() +
+    ggtitle("Cumulative Surface Elevation Change") +
+    ylab("change (mm)")
+dev.off()
+
