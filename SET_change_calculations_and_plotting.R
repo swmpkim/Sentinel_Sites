@@ -45,6 +45,7 @@ ggplot(pin_change, aes(x=date, y=change)) +
 
 # to get that into rise per day, accounting for leap year:
 slr_slope <- 3.5*4/(4*365+1)
+# update 7/18/17 - the above is equivalent to 3.5/365.25
 
 # and intercept, because time 0 is at 1970-01-01 and we want line to go through 0
 slr_int <- 0 - slr_slope*as.integer(pin_change[1,]$date)
@@ -116,11 +117,12 @@ models <- pin_change %>%
 modelcoefbysite <- tidy(models, mod, conf.int=TRUE, conf.level=0.95) # this gives the intercept, slope, and p values, among others; conf.int=TRUE, conf.level=0.95 gives the 95% confidence interval
 
 # make a slope per year for date estimate; NAs for intercept
-modelcoefbysite$mm.yr <- ifelse(modelcoefbysite$term == "date", round((modelcoefbysite$estimate * 4 * 365 + 1)/4, 3), "NA")
+# 7/18/2017 CORRECTED THESE CALCULATIONS
+modelcoefbysite$mm.yr <- ifelse(modelcoefbysite$term == "date", round(modelcoefbysite$estimate * 365.25, 3), "NA")
 
 # confidence intervals in mm/yr:
-modelcoefbysite$conf.low.yr <- ifelse(modelcoefbysite$term == "date", round((modelcoefbysite$conf.low * 4 * 365 + 1)/4, 3), "NA")
-modelcoefbysite$conf.high.yr <- ifelse(modelcoefbysite$term == "date", round((modelcoefbysite$conf.high * 4 * 365 + 1)/4, 3), "NA")
+modelcoefbysite$conf.low.yr <- ifelse(modelcoefbysite$term == "date", round(modelcoefbysite$conf.low * 365.25, 3), "NA")
+modelcoefbysite$conf.high.yr <- ifelse(modelcoefbysite$term == "date", round(modelcoefbysite$conf.high * 365.25, 3), "NA")
 
 modelsummarybysite <- glance(models, mod) # this gives r^2 and adjusted r^2, and p values, among others
 

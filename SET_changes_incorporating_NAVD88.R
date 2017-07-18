@@ -54,15 +54,20 @@ pin_change$navdadj2 <- NAVD88$factor2[match(pin_change$site.platform, NAVD88$Sit
 
 # make the new column
 # BEWARE - the units are different. turn this all into meters.
-pin_change <- mutate(pin_change, meanadj = (mean/1000) + navdadj,
-                     meanadj2 = (mean/1000) + navdadj2)
+pin_change <- mutate(pin_change, meanadj = (mean/1000) + navdadj)
 
 
 # big scatter plot of all sites
 ggplot(pin_change, aes(x=date, y=meanadj)) +
     geom_point(aes(col=site.platform), alpha=0.5, size=3) +
     theme_minimal() +
-    ggtitle("SETS through time relative to NAVD88") +
+    ggtitle("SETS through time relative to NAVD88 - wrong adjustment factor") +
+    ylab("elevation (m)")
+
+ggplot(pin_change, aes(x=date, y=meanadj2)) +
+    geom_point(aes(col=site.platform), alpha=0.5, size=3) +
+    theme_minimal() +
+    ggtitle("SETS through time relative to NAVD88 - correct adjustment factor") +
     ylab("elevation (m)")
 
 
@@ -78,6 +83,7 @@ slr_slope <- 3.5*4/(4*365+1)/1000
 # and intercept, because time 0 is at 1970-01-01 and we want line to go through 0
 # and MSL is 0.236
 # MHW is 0.456
+# got these numbers out of the master spreadsheet; don't know where they originated.
 slr_int <- 0.236 - slr_slope*as.integer(pin_change[1,]$date)
 mhw_int <- 0.456 - slr_slope*as.integer(pin_change[1,]$date)
 mlw_int <- 0.039 - slr_slope*as.integer(pin_change[1,]$date)
@@ -281,6 +287,13 @@ ggplot(pin_change, aes(x=date, y=meanadj2)) +
     geom_abline(aes(slope = slr_slope, intercept = mlw_int), col="blue", lty=2) +
     geom_point(aes(col=site), alpha=0.7, size=2) +
     geom_smooth(method="lm", aes(group=site, col=site)) +
+    theme_minimal() +
+    ggtitle("SETS through time relative to NAVD88") +
+    ylab("elevation (m)") +
+    ylim(0, 0.8)
+
+ggplot(pin_change, aes(x=date, y=meanadj2)) +
+    geom_point(aes(col=site), alpha=0.7, size=2) +
     theme_minimal() +
     ggtitle("SETS through time relative to NAVD88") +
     ylab("elevation (m)") +
