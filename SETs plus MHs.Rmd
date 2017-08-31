@@ -1,0 +1,260 @@
+
+---
+title: "SETs and Marker Horizons"
+date: "`r Sys.Date()`"
+output: 
+    html_document:
+        keep_md: true
+        code_folding: 'hide'
+        fig_width: 8
+        fig_height: 6
+---
+
+__Note__: R code in this document is hidden by default, but the chunks used for each step that follows can be viewed by clicking "code" on the right side of the file.   
+   
+### Setup & Data Prep for SETs  
+   
+1. Loading data that was processed via `SET_processing_and_summarizing.R` script; available here: https://github.com/swmpkim/Sentinel_Sites/blob/master/SET_processing_and_summarizing.R   
+
+2. Processing some NAVD88 information to calculate an adjustment factor for pin heights: NAVD88 location of marsh surface = total measured height (leveled SET + leveled adapter + pin reading) - pin length (0.756m)
+    - __Note__: 0.756 as pin length needs to be verified with Will U.
+
+3. Subtracting first pin reading (actually the average of 36 readings) at a platform (e.g., JURO-1) from all subsequent readings to generate change over time.
+
+4. Creating a column for site:   
+    -  __CLMA = Cladium:__
+        - CLMAJ-1 
+        - CLMAJ-2 
+        - CLMAJ-3
+    -  __PANN = Panne:__
+        - PANNE-1
+        - PANNE-2
+        - PANNE-3
+    -  __LOJU = Lower Juncus:__
+        - JURO-1
+        - JURO-2
+        - JURO-3
+    -  __UPJU = Upper Juncus:__
+        - JURO-4
+        - JURO-5
+        - JURO-6
+    -  __SPAL = Spartina:__
+        - SPAL-1
+        - SPAL-2
+        - SPAL-3
+
+5. Calculating NAVD-88 adjusted pin heights
+
+```{r, message=FALSE, warning=FALSE}
+library(reshape2)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(broom)
+library(knitr)
+library(lubridate)
+# load group of files, generated from SET_summarizing.R
+load("sets.group.R")
+
+# set up a NAVD88 data frame
+NAVD88 <- read.csv("NAVD88.csv")
+# calculate the adjustment factor that will need to be applied to pin heights:
+### total height (set + adapter + reading) - pin length (0.756) = NAVD88 location of marsh surface
+NAVD88 <- mutate(NAVD88, totalfactor = SET_NAVD88 + Adapter_NAVD88 - 0.756)
+
+# subtract first reading at a platform from all subsequent readings
+# split, apply, combine
+pin_split <- split(pin_summary, pin_summary$site.platform) %>%
+    lapply(., FUN = function(x) {mutate(x, "change" = mean - mean[1])})
+pin_change <- do.call(rbind, pin_split) %>%
+    mutate(., site = substr(site.platform, 1, 4))
+
+# need to split upper and lower juncus
+# JURO1-3 is lower
+# 4-6 is upper
+upper <- c("JURO-4", "JURO-5", "JURO-6")
+lower <- c("JURO-1", "JURO-2", "JURO-3")
+pin_change$site[pin_change$site.platform %in% upper] <- "UPJU"
+pin_change$site[pin_change$site.platform %in% lower] <- "LOJU"
+
+# calculate NAVD-adjusted pin heights
+# first add the adjustment factor to the data frame
+pin_change$navdadj <- NAVD88$totalfactor[match(pin_change$site.platform, NAVD88$Site)]
+
+# then calculate the adjusted value
+# BEWARE - the units are different. turn this all into meters.
+pin_change <- mutate(pin_change, meanadj = (mean/1000) + navdadj)
+```
+   
+   
+In the data frame `pin_change`, we now have the following columns:   
+   
+- __site.platform__ - the individual SET platform, e.g. CLMAJ-1
+- __date__ - date of pin reading
+- __mean__ - mean of 36 pin readings on that date
+- __stddev__ - standard deviation of 36 pin readings on that date
+- __stderr__ - standard error of the mean for 36 in readings on that date
+- __site__ - site that the SET platform belongs to, e.g. CLMA
+- __sdymin__ - ymin for plotting error bars using standard deviation (mean - stddev)
+- __sdymax__ - ymax for plotting error bars using standard deviation (mean + stddev)
+- __seymin__ - ymin for plotting error bars using standard error (mean - stderr)
+- __seymax__ - ymax for plotting error bars using standard error (mean + stderr)
+- __change__ - change (mm) since first reading
+- __navdadj__ - adjustment factor to relate mean pin readings to NAVD88; calculated for each individual site.platform
+- __meanadj__ - mean marsh elevation (m) relative to NAVD88 on the sample date: mean of 36 pin readings, converted to m, plus the adjustment factor for the individual site.platform
+   
+   
+Here are the first and last 3 rows of the data frame we're working with:   
+   
+```{r}
+
+kable(head(pin_change, 3))
+kable(tail(pin_change, 3))
+```
+
+
+***
+
+### Setup and processing - marker horizons
+
+```{r, message=FALSE, warning=FALSE}
+# format feldspar application data
+feldspar <- read.csv("feldspar_apps.csv")
+# glue site.platform and plat together
+feldspar <- mutate(feldspar, site.platform.plat = paste0(site.platform, "_", plat))
+# put application dates in date format
+feldspar$feldspar_1 <- mdy(feldspar$feldspar_1)
+feldspar$feldspar_2 <- mdy(feldspar$feldspar_2)
+
+
+# read marker horizon data; glue site, platform, plat, and rep together into one identifier; gather into a long dataset
+markers <- read.csv("marker_horizons.csv")
+markers <- markers %>%
+    mutate(site.platform.plat.rep = paste0(site.platform, "_", plat, "_", rep)) %>%
+    gather(key = date, value = sed_height, -site.platform.plat.rep, -site.platform, -plat, -rep)
+
+# remove the 'X' before the date and put it in date format
+markers$date <- sub('.', '', markers$date) 
+markers$date <- mdy(markers$date)
+
+# give it sites:
+markers <- mutate(markers, site = substr(site.platform, 1, 4))
+
+# need to split upper and lower juncus
+# JURO1-3 is lower
+# 4-6 is upper
+upper <- c("JURO_4", "JURO_5", "JURO_6")
+lower <- c("JURO_1", "JURO_2", "JURO_3")
+markers$site[markers$site.platform %in% upper] <- "UPJU"
+markers$site[markers$site.platform %in% lower] <- "LOJU"
+
+
+# make NAs something that will show up on the graph. -10?
+markers$sed_height_noNA <- markers$sed_height
+markers$sed_height_noNA[is.na(markers$sed_height_noNA)] <- -10
+```
+
+### See the data we're working with
+
+First and last three rows of the data frame.
+
+Variables:
+
+* __site__ and __site.platform__ are the same as in the SETs file (e.g. CLMA and CLMAJ-1, respectively). 
+* __plat__ is the number (out of 3) of the sediment core. 
+* __rep__ is a letter identifier (A-D) for the four replicate measurements within that sediment core.
+* __site.platform.plat.rep__ is all of that strung together as the identifier for a single measurement.
+* __date__ is self-explanatory.
+* __sed_height__ is the measurement of sediment in mm above the feldspar marker horizon.
+* __sed_height_noNA__ replaces any missing measurements in the _sed_height_ column with -10 so they'll be visible on the graph.
+
+```{r}
+library(knitr)
+kable(head(markers, 3))
+kable(tail(markers, 3))
+```
+
+
+__See when feldspar was applied at each site__
+
+```{r}
+kable(feldspar)
+```
+
+
+__So first application was August 18, 2011. Let's see only ones that have had second applications.__
+
+```{r}
+secondapp <- feldspar %>%
+    filter(!is.na(feldspar_2)) %>%
+    select(site.platform.plat, feldspar_1, feldspar_2)
+
+kable(secondapp)
+
+filter(markers, site.platform == "CLMAJ_3" & plat == 2 & date >= "2013-06-01" & date <= "2014-03-01") %>% select(site.platform.plat.rep, date, sed_height)
+
+filter(markers, site.platform == "JURO_4" & plat == 3 & date >= "2012-10-01" & date <= "2013-12-01") %>% select(site.platform.plat.rep, date, sed_height)
+
+filter(markers, site.platform == "JURO_5" & plat == 1 & date >= "2012-10-01" & date <= "2013-12-01") %>% select(site.platform.plat.rep, date, sed_height)
+
+filter(markers, site.platform == "JURO_6" & plat == 1 & date >= "2013-01-01" & date <= "2013-12-01") %>% select(site.platform.plat.rep, date, sed_height)
+
+filter(markers, site.platform == "PANNE_1" & plat == 1 & date >= "2013-06-01" & date <= "2014-03-01") %>% select(site.platform.plat.rep, date, sed_height)
+
+filter(markers, site.platform == "PANNE_1" & plat == 3 & date >= "2012-10-01" & date <= "2013-12-01") %>% select(site.platform.plat.rep, date, sed_height)
+
+filter(markers, site.platform == "SPAL_1" & plat == 1 & date >= "2011-10-01" & date <= "2012-08-01") %>% select(site.platform.plat.rep, date, sed_height)
+
+filter(markers, site.platform == "SPAL_1" & plat == 2 & date >= "2011-10-01" & date <= "2012-08-01") %>% select(site.platform.plat.rep, date, sed_height)
+
+filter(markers, site.platform == "SPAL_1" & plat == 3 & date >= "2011-10-01" & date <= "2012-08-01") %>% select(site.platform.plat.rep, date, sed_height)
+
+filter(markers, site.platform == "SPAL_2" & plat == 3 & date >= "2013-06-01" & date <= "2014-03-01") %>% select(site.platform.plat.rep, date, sed_height)
+
+```
+
+
+### Glue together marker horizon and pin change data
+
+First have to generate mean accretion, stdev, and sterr for each platform
+
+```{r}
+marker_summary <- markers %>%
+    group_by(site.platform, date) %>%
+    dplyr::summarize(meanaccum = mean(sed_height, na.rm=TRUE), sdacc = sd(sed_height, na.rm=TRUE), seacc=sdacc/sqrt(length(sed_height)))
+
+# make the punctuation the same in both data frames (turn marker summary ones from CLMAJ_1 to CLMAJ-1 etc.); specify that it's a factor
+marker_summary$site.platform <- factor(sub("_", "-", marker_summary$site.platform))
+
+# join
+dat_all <- full_join(pin_change, marker_summary, by=c("site.platform", 'date'))
+```
+
+
+
+### Plot SETs and MH data on the same graph
+
+One graph per platform
+
+```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=10}
+ggplot(dat_all) +
+    geom_point(aes(x=date, y=change, col='surface_elevation')) +
+    geom_errorbar(aes(x=date, ymin=change-stderr, ymax=change+stderr, col='surface_elevation')) +
+    geom_point(aes(x=date, y=meanaccum, col='accretion')) +
+    geom_errorbar(aes(x=date, ymin=meanaccum-seacc, ymax=meanaccum+seacc, col='accretion')) +
+    facet_wrap(~site.platform, ncol=3) +
+    scale_color_manual(values=c("deepskyblue3", "gray22")) +
+    theme_bw()
+
+```
+
+
+***
+***
+***
+***
+***
+***
+
+
+

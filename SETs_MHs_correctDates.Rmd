@@ -1,0 +1,866 @@
+---
+title: "SETs_MHs_correctDates"
+date: "`r Sys.Date()`"
+output: 
+    html_document:
+        keep_md: true
+        code_folding: 'hide'
+        fig_width: 8
+        fig_height: 6
+---
+
+### Updates 
+
+* Marker Horizon data file updated 8/31/2017: Added in readings of 0 on dates marker horizons were re-laid.
+
+***
+***
+
+
+These .csv files have been run through a few steps before getting to this point.  
+
+The raw SET-pin data and Marker Horizon data spreadsheets were imported into R and changed into a long format. For SET-pin data, this happened in `SET_processing_and_summarizing.R`. That file was further run through `SETs.Rmd` to format correctly, etc.; then through `wide_format_conversion.R` to get it into wide format (individual SET tables and sample dates as row identifiers; arm-pin as column identifiers).
+
+Marker horizons were read in through the `SETs plus MHs.Rmd` file, then run through `wide_format_conversion.R` to get into wide format with SET table and sample dates as row identifiers, and plat-rep (e.g. 1-A) as column names.
+
+Once the files were in wide format, with only one row per site and date, I went through the field notebooks and corrected any date discrepancies.
+
+This file will read the files with corrected dates back into R and use some of the regression steps from `SETs.Rmd` to generate slopes for each site for both overall elevation change (from pin data) and accretion (from marker horizon data).
+
+Because the data is in a different format than in the original workup, there may be some different steps involved. At this point, we're starting fresh and should not have to go back to any of the previously mentioned files or scripts..... I hope.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+library(broom)
+library(knitr)
+library(agricolae)
+```
+
+### Read in data
+
+```{r, message=FALSE, warning=FALSE}
+sets <- read.csv("sets_wide_corrected.csv", stringsAsFactors = FALSE) %>%
+    mutate(date = mdy(date)) %>%
+    gather(key = arm.pin, value = pin_height, -site.platform, -date) %>%
+    mutate(arm.pin = sub('.', '', arm.pin)) %>%
+    arrange(site.platform, date)
+
+    
+markers <- read.csv("markers_wide_corrected.csv", stringsAsFactors = FALSE) %>%
+    mutate(date = mdy(date)) %>%
+    gather(key = plat.rep, value = sed_height, -site.platform, -date) %>%
+    mutate(plat.rep = sub('.', '', plat.rep)) %>%
+    arrange(site.platform, date)
+```
+
+
+### Work up some summaries
+
+#### Pin readings:  
+
+*  group by site.platform and date; calculate mean, st deviation, st error  
+*  subtract first reading at site from all subsequent readings. NOTE that `pin_change$change` is elevation change, in mm, relative to the first reading, which is on or around 2-29-2012 at all sites.  
+*  add column for overall site names (e.g. UPJU = Upper Juncus = JURO-4, JURO-5, and JURO-6)
+
+```{r}
+# group by platform and date, then calculate mean and standard deviation
+pin_summary <- dplyr::summarize(group_by(sets, site.platform, date), mean = mean(pin_height, na.rm=TRUE), stddev = sd(pin_height, na.rm=TRUE), stderr = stddev/sqrt(length(pin_height))) 
+
+# subtract first reading at a platform from all subsequent readings
+# split, apply, combine
+pin_split <- split(pin_summary, pin_summary$site.platform) %>%
+    lapply(., FUN = function(x) {mutate(x, "change" = mean - mean[1])})
+pin_change <- do.call(rbind, pin_split) %>%
+    mutate(., site = substr(site.platform, 1, 4))
+
+# need to split upper and lower juncus
+# JURO1-3 is lower
+# 4-6 is upper
+upper <- c("JURO-4", "JURO-5", "JURO-6")
+lower <- c("JURO-1", "JURO-2", "JURO-3")
+pin_change$site[pin_change$site.platform %in% upper] <- "UPJU"
+pin_change$site[pin_change$site.platform %in% lower] <- "LOJU"
+
+# clean up the temporary files
+rm(pin_summary)
+rm(pin_split)
+rm(lower)
+rm(upper)
+```
+
+NAVD-88 adjustments:
+
+```{r}
+# set up a NAVD88 data frame
+NAVD88 <- read.csv("NAVD88.csv")
+# calculate the adjustment factor that will need to be applied to pin heights:
+### total height (set + adapter + reading) - pin length (0.756) = NAVD88 location of marsh surface
+NAVD88 <- mutate(NAVD88, totalfactor = SET_NAVD88 + Adapter_NAVD88 - 0.756)
+
+# calculate NAVD-adjusted pin heights
+# first add the adjustment factor to the data frame
+pin_change$navdadj <- NAVD88$totalfactor[match(pin_change$site.platform, NAVD88$Site)]
+
+# then calculate the adjusted value
+# BEWARE - the units are different. turn this all into meters.
+pin_change <- mutate(pin_change, meanadj = (mean/1000) + navdadj)
+```
+
+
+
+#### Marker Horizons:
+
+```{r}
+# give it sites:
+markers <- mutate(markers, site = substr(site.platform, 1, 4))
+
+# need to split upper and lower juncus
+# JURO1-3 is lower
+# 4-6 is upper
+upper <- c("JURO_4", "JURO_5", "JURO_6")
+lower <- c("JURO_1", "JURO_2", "JURO_3")
+markers$site[markers$site.platform %in% upper] <- "UPJU"
+markers$site[markers$site.platform %in% lower] <- "LOJU"
+
+rm(upper)
+rm(lower)
+
+# spit out an excel file that can be worked with
+markers2 <- markers %>%
+    mutate(plat = substr(plat.rep, 1, 1),
+           rep = substr(plat.rep, 3, 3),
+           site.platform.plat = paste0(site.platform, "-", plat)) %>%
+    select(site.platform, site.platform.plat, plat, rep, date, sed_height) %>%
+    spread(key = rep, value = sed_height) %>%
+    select(-site.platform.plat) %>%
+    arrange(site.platform, plat, date)
+# 
+# write.csv(markers2, "markers_to_work_with.csv", row.names = FALSE)
+
+markerdates <- data.frame(markers = unique(markers$date)) %>%
+    arrange(markers)
+setdates <- data.frame(sets = unique(sets$date)) %>%
+    arrange(sets)
+```
+
+Marker Horizon Sample Dates
+
+```{r}
+# kable(markerdates)
+```
+
+SET Sample Dates
+
+```{r}
+# kable(setdates)
+```
+
+
+### Glue together marker horizon and pin change data
+
+First have to generate mean accretion, stdev, and sterr for each platform
+
+```{r, message=FALSE, warning=FALSE}
+marker_summary <- markers %>%
+    group_by(site.platform, date) %>%
+    dplyr::summarize(meanaccum = mean(sed_height, na.rm=TRUE), sdacc = sd(sed_height, na.rm=TRUE), seacc=sdacc/sqrt(length(sed_height)))
+
+# make the punctuation the same in both data frames (turn marker summary ones from CLMAJ_1 to CLMAJ-1 etc.); specify that it's a factor
+marker_summary$site.platform <- factor(sub("_", "-", marker_summary$site.platform))
+
+# join
+dat_all <- full_join(pin_change, marker_summary, by=c("site.platform", 'date'))
+```
+
+
+
+### Plot SETs and MH data on the same graph
+
+One graph per platform
+
+NOTE that these plots do NOT account for relaying of feldspar!!!
+
+To my knowledge, these are feldspar reapplication dates. First laying was 8/18/2011. Second laying was:
+
+*  CLMAJ-3 plat 2: 11/19/2013
+*  JURO-4 plat 3: 7/2/2013
+*  JURO-5 plat 1: 7/2/2013
+*  JURO-6 plat 1: 7/2/2013
+*  PANNE-1 plat 1: 11/19/2013
+*  PANNE-1 plat 3: 7/2/2013
+*  SPAL-1 plats 1, 2, and 3: 2/28/2012
+*  SPAL-2 plat 3: 11/19/2013
+
+
+SO to properly account for this... we can't average sediment height of all plats together for a date. __AND THAT'S WHAT I'VE DONE TO GENERATE THE GRAPHS BELOW. USE CAUTION IN INTERPRETING THEM.__
+
+Probably ought to make a column for change. Change since 8/18/2011? That will just be raw sediment height, unless feldspar was relaid. Then change would be [sed_ht] + [sed_ht_on_last_date_before_relaid_feldspar]
+
+And I'm not really sure how to script that.  
+
+```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=10}
+ggplot(dat_all) +
+    geom_point(aes(x=date, y=change, col='surface_elevation'), size=2, alpha=0.7) +
+    geom_errorbar(aes(x=date, ymin=change-stderr, ymax=change+stderr, col='surface_elevation')) +
+    geom_point(aes(x=date, y=meanaccum, col='accretion'), size=2, alpha=0.7) +
+    geom_errorbar(aes(x=date, ymin=meanaccum-seacc, ymax=meanaccum+seacc, col='accretion')) +
+    facet_wrap(~site.platform, ncol=3) +
+    scale_color_manual(values=c("deepskyblue3", "gray22")) +
+    theme_bw()
+
+```
+
+
+See if I can get some regression lines on there:
+
+
+```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=10}
+ggplot(dat_all) +
+    geom_point(aes(x=date, y=change, col='surface_elevation'), size=2, alpha=0.5) +
+    geom_errorbar(aes(x=date, ymin=change-stderr, ymax=change+stderr, col='surface_elevation')) +
+    geom_point(aes(x=date, y=meanaccum, col='accretion'), size=2, alpha=0.5) +
+    geom_errorbar(aes(x=date, ymin=meanaccum-seacc, ymax=meanaccum+seacc, col='accretion')) +
+    facet_wrap(~site.platform, ncol=3) +
+    geom_smooth(method="lm", aes(x=date, y=change, col='surface_elevation'), se=FALSE) +
+    geom_smooth(method="lm", aes(x=date, y=meanaccum, col='accretion'), se=FALSE) +
+    scale_color_manual(values=c("deepskyblue3", "gray22")) +
+    theme_bw()
+
+```
+
+
+### Spit out some slopes from those regressions
+
+#### Elevation change (pins)
+
+```{r}
+elevmodels <- dat_all %>%
+    group_by(site.platform) %>%  
+    do(mod = lm(change ~ date, data=.))
+
+elevcoefbysite <- tidy(elevmodels, mod, conf.int=TRUE, conf.level=0.95) # this gives the intercept, slope, and p values, among others; conf.int=TRUE, conf.level=0.95 gives the 95% confidence interval
+
+# make a slope per year for date estimate; NAs for intercept
+elevcoefbysite$mm.yr <- ifelse(elevcoefbysite$term == "date", round(elevcoefbysite$estimate * 365.25, 3), "NA")
+
+# confidence intervals in mm/yr:
+elevcoefbysite$conf.low.yr <- ifelse(elevcoefbysite$term == "date", round(elevcoefbysite$conf.low * 365.25, 3), "NA")
+elevcoefbysite$conf.high.yr <- ifelse(elevcoefbysite$term == "date", round(elevcoefbysite$conf.high * 365.25, 3), "NA")
+
+elevsummarybysite <- glance(elevmodels, mod) # this gives r^2 and adjusted r^2, and p values, among others
+
+# kable(elevcoefbysite)
+# kable(elevsummarybysite)
+```
+
+
+__Table of regression slopes only for elevation change__
+
+```{r}
+slopes <- elevcoefbysite %>%
+    filter(term == 'date') %>%
+    mutate(site = substr(site.platform, 1, 4), mm.day = estimate) %>%
+    select(site.platform, site, mm.day, mm.yr, std.error, p.value) 
+slopes$mm.yr <- as.numeric(slopes$mm.yr)
+
+# need to split upper and lower juncus
+upper <- c("JURO-4", "JURO-5", "JURO-6")
+lower <- c("JURO-1", "JURO-2", "JURO-3")
+slopes$site[slopes$site.platform %in% upper] <- "UPJU"
+slopes$site[slopes$site.platform %in% lower] <- "LOJU"
+
+kable(slopes)
+```
+
+
+
+## Deal with marker horizon re-lay dates
+
+I generated a csv file of marker horizon data with a row for each combination of site-plat and date, and a column for each of the 4 readings taken from a core within a plat. Here are the top 10 rows of that table:
+
+```{r}
+kable(head(markers2, 10))
+```
+
+I manually added two columns into the csv:  
+
+*  ref_date: Date of most recent feldspar application for each sample date
+*  ref_accum: For each feldspar application, the average sediment height at the plat on the prior reading (when readings were able to be made). Cumulative sediment height, since the very first application of felspar, would be that reference height plus the new reading, because the reference height acts as the "new" zero point.  
+    +  There are some problems with this, particularly when there was a missing reading before reapplication of feldspar - the reference accumulation could be a value that's 6 months old. __I'm very worried that this will underestimate erosion effects.__  
+    +  The reason I'm interested in calculating cumulative accretion since the very first feldspar application is to use a linear regression to calculate the rate of accretion, like we did for the SET pin data.  
+  
+  
+I see a few ways to calculate accretion rates, and intend to generate them each way and compare.  
+
+*  Linear regression using cumulative accretion data (generated using the reference accretion values)  
+*  Calculate the number of days from the most recent feldspar application, and convert the sediment height to a rate of accretion from time-0.  
+*  Calculate the number of days from the most recent measurement, and convert the difference in sediment height to a rate from the previous time - which should give approximately quarterly rates, and give us some idea of seasonal variation.
+
+## All marker horizon calculations below this point use a differnt file than what's above
+
+Below uses the file `markers_with_references.csv`
+
+Above used `markers_wide_CORRECTED.csv`
+
+
+#### Okay, so the data frame looks like this now:
+
+I'm going to pull out CLMAJ-3, plat 2, where feldspar was re-laid on 11/19/2013. Notice that the reference date and reference accumulation change on 2/3/2014.
+
+```{r}
+markers3 <- read.csv("markers_with_references.csv", stringsAsFactors = FALSE) %>%
+    mutate(date = mdy(date))
+
+example <- markers3 %>%
+    filter(site.platform == "CLMAJ_3", plat == "2")
+
+kable(example)
+```
+
+To generate regression slopes, I need to make columns for cumulative accretion for each reading. That will be the reading + ref_accum. Really, I guess we only care about the mean, but I think this is easier for now.
+
+```{r}
+markers3 <- markers3 %>%
+    mutate(A_cumu = A + ref_accum,
+           B_cumu = B + ref_accum,
+           C_cumu = C + ref_accum,
+           D_cumu = D + ref_accum,
+           ref_date = mdy(ref_date))
+```
+
+
+Let's look at the same subset of data again to make sure it all looks legit.
+
+```{r}
+example <- markers3 %>%
+    filter(site.platform == "CLMAJ_3", plat == "2")
+
+kable(example)
+```
+
+
+Okay, that's in good shape to start summarizing and running the various calculations on.
+
+```{r}
+markers3 <- markers3 %>%
+    group_by(site.platform, plat, date) %>%
+    mutate(avg_cumu = mean(c(A_cumu, B_cumu, C_cumu, D_cumu), na.rm=TRUE),
+           avg_ht = mean(c(A, B, C, D), na.rm=TRUE))
+```
+
+Check and make sure averages look legit, then I'll trim out the raw readings.  
+
+*  avg_cumu is the average of the cumulative readings (incorporating ref_accum; accounts for felspar re-lays).
+*  avg_ht is the average of the raw sediment heights.
+
+```{r}
+kable(head(markers3, 10))
+
+markers3 <- markers3 %>%
+    select(site.platform, plat, date, ref_date, avg_ht, avg_cumu)
+
+kable(head(markers3, 10))
+```
+
+Calculate some rates for every date and check out that same example data.
+
+```{r}
+markers4 <- markers3 %>%
+    ungroup() %>%
+    group_by(site.platform, plat) %>%
+    mutate(mm.yr_since_feldapp = avg_ht/(as.numeric(date - ref_date)) * 365.25,
+           mm_since_prev = avg_ht - lag(avg_ht, 1),
+           days_since_prev = as.numeric(date - lag(date, 1)),
+           days_since_feldapp = as.numeric(date - ref_date),
+           yrs_since_feldapp = days_since_feldapp/365.25,
+           mm.yr_since_prev = mm_since_prev/days_since_prev * 365.25)
+
+example <- markers4 %>%
+    filter(site.platform == "CLMAJ_3", plat == "2")
+
+kable(example)
+```
+
+I guess... just average the rates and see how they compare? Cumulative accretion feeding into a linear regression will be a different process.
+
+A couple graphs might be good too.
+
+```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=10}
+# ggplot(markers4) +
+#     geom_point(aes(x=date, y=mm_since_prev, col="mm_since_prev"), size=2, alpha=0.6) +
+#     geom_point(aes(x=date, y=avg_cumu, col="mm_since_feldapp"), size=3, alpha=0.6) +
+#     facet_wrap(~site.platform, ncol=3) +
+#     theme_bw() +
+#     ggtitle("accretion since time 0 OR since previous reading")
+# 
+# ggplot(markers4) +
+#     geom_point(aes(x=date, y=mm.yr_since_t0, col="rate_since_t0"), size=2, alpha=0.6) +
+#     geom_point(aes(x=date, y=mm.yr_since_prev, col="rate_since_prev"), size=2, alpha=0.6) +
+#     facet_wrap(~site.platform, ncol=3) +
+#     theme_bw() +
+#     ggtitle("rates since time 0 OR since previous reading")
+```
+
+A few notes on these graphs:  
+
+*  Rate since previous reading is all over the place. I wonder how the average will come out.
+*  Rate since time 0 looks like it stays close to 0, which is generally what we expect (I mean, we're racing SLR, which is 3.5mm/yr) - this should probably be pulled out into different graphs for a better scale.
+*  Accretion since time 0 is what I need to use to calculate a rate from linear regression.
+
+
+```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=10}
+# ggplot(markers4) +
+#     geom_point(aes(x=date, y=mm.yr_since_t0, col="rate_since_t0"), size=3, alpha=0.6) +
+#     facet_wrap(~site.platform, ncol=3) +
+#     theme_bw() +
+#     ggtitle("rates since time 0")
+# 
+# ggplot(markers4) +
+#     geom_point(aes(x=date, y=avg_cumu, col="mm_since_t0"), size=3, alpha=0.6) +
+#     geom_smooth(aes(x=date, y=avg_cumu), se=FALSE) +
+#     facet_wrap(~site.platform, ncol=3) +
+#     theme_bw() +
+#     ggtitle("accretion since time 0")
+# 
+# ggplot(markers4) +
+#     geom_point(aes(x=date, y=avg_cumu, col="mm_since_t0"), size=3, alpha=0.6) +
+#     geom_smooth(aes(x=date, y=avg_cumu), method = "lm", se=FALSE) +
+#     facet_wrap(~site.platform, ncol=3) +
+#     theme_bw() +
+#     ggtitle("accretion since time 0")
+```
+
+PANNE-1 Plat 1 is bothering me (see emails for details). What happens if we exclude it?
+
+```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=10}
+# markers5 <- markers4 %>%
+#     mutate(site.platform.plat = paste0(site.platform, "-", plat)) %>%
+#     filter(site.platform.plat != "PANNE_1-1")
+# 
+# ggplot(markers5) +
+#     geom_point(aes(x=date, y=avg_cumu, col="mm_since_t0"), size=3, alpha=0.6) +
+#     geom_smooth(aes(x=date, y=avg_cumu), method = "lm", se=FALSE) +
+#     facet_wrap(~site.platform, ncol=3) +
+#     theme_bw() +
+#     ggtitle("accretion since time 0 EXCLUDING PANNE-1-1")
+```
+
+
+
+### Some box plots
+
+```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=10}
+a <- ggplot(markers4) +
+    geom_boxplot(aes(x=site.platform, y=mm.yr_since_prev, col=site.platform)) +
+    theme_bw() +
+    theme(legend.position="none") +
+    ggtitle("rates since previous")
+
+b <- ggplot(markers4) +
+    geom_boxplot(aes(x=site.platform, y=mm.yr_since_feldapp, col=site.platform)) +
+    theme_bw() +
+    theme(legend.position="none") +
+    ggtitle("rates since time 0")
+
+c <- ggplot(markers4) +
+    geom_boxplot(aes(x=site.platform, y=mm_since_prev, col=site.platform)) +
+    theme_bw() +
+    theme(legend.position="none") +
+    ggtitle("accumulation over 3 months")
+
+library(gridExtra)
+grid.arrange(a,b,c, ncol=1)
+```
+
+### Those same box plots with different y-scaling
+
+```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=10}
+a <- ggplot(markers4) +
+    geom_boxplot(aes(x=site.platform, y=mm.yr_since_prev, col=site.platform)) +
+    theme_bw() +
+    theme(legend.position="none") +
+    coord_cartesian(ylim=c(-50, 50)) +
+    ggtitle("accretion rates since previous reading")
+
+b <- ggplot(markers4) +
+    geom_boxplot(aes(x=site.platform, y=mm.yr_since_feldapp, col=site.platform)) +
+    theme_bw() +
+    theme(legend.position="none") +
+    coord_cartesian(ylim=c(-10, 25)) +
+    ggtitle("accretion rates since time 0")
+
+c <- ggplot(markers4) +
+    geom_boxplot(aes(x=site.platform, y=mm_since_prev, col=site.platform)) +
+    theme_bw() +
+    theme(legend.position="none") +
+    coord_cartesian(ylim=c(-10, 25)) +
+    ggtitle("accretion over 3 months")
+
+library(gridExtra)
+grid.arrange(a,b,c, ncol=1)
+```
+
+## Here's an idea.
+
+explanatory variable (x-axis) = # days since feldspar application
+response variable (y-axis) = mm of sediment above feldspar
+color of points = date of feldspar application
+
+So there's just one set of points with all the various accretion amounts, and all of that feeds into the rate via linear regression. That way there's no messing with the data (like with the earlier attempts at cumulative, where I had to make a judgement call about what to add to subsequent points after feldspar re-lays), and everything is just weighted according to its overall contribution.
+
+In the future, when feldspar is re-laid at all sites at once, you could look at evenly spaced chunks of time; like if it's laid every 2 years or something, then it's even across all sites and plats.
+
+But here, where we don't have that even spacing, I think this might be the best way to lump everything in together.
+
+So then the question is, do we group by plat, or by site.platform? My inclination is to use site.platform, since that's the observational unit for the SETs.
+
+I think the data set is already shaped appropriately for this.
+
+Here goes:
+
+This one is a bit accidental, actually, because of where I assigned colors by feldspar application date. But I'm keeping it so we can visually compare the slopes of the lines between application dates - because in theory, that should be similar.
+
+```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=10}
+ggplot(markers4, aes(x=days_since_feldapp, y = avg_ht, col=factor(ref_date))) +
+    geom_point(size=3, alpha=0.7) +
+    geom_smooth(method="lm", se=FALSE) +
+    facet_wrap(~site.platform, ncol=3) +
+    theme_bw() +
+    ggtitle("Marker Horizon Accumulations") +
+    xlab("# days since feldspar application") +
+    ylab("sediment height over feldspar")
+```
+
+Here's what I meant to do in the first place - just one line per site.platform:
+
+```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=10}
+ggplot(markers4, aes(x=days_since_feldapp, y = avg_ht)) +
+    geom_point(aes(col=factor(ref_date)), size=3, alpha=0.7) +
+    geom_smooth(method="lm", se=FALSE) +
+    facet_wrap(~site.platform, ncol=3) +
+    theme_bw() +
+    ggtitle("Marker Horizon Accumulations") +
+    xlab("# days since feldspar application") +
+    ylab("sediment height over feldspar")
+```
+
+
+```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=10}
+ggplot(markers4, aes(x=yrs_since_feldapp, y = avg_ht)) +
+    geom_point(aes(col=factor(ref_date)), size=3, alpha=0.7) +
+    geom_smooth(method="lm", se=FALSE) +
+    facet_wrap(~site.platform, ncol=3) +
+    theme_bw() +
+    ggtitle("Marker Horizon Accumulations") +
+    xlab("# years since feldspar application") +
+    ylab("sediment height over feldspar")
+```
+
+***
+***
+***
+***
+***
+
+## Possibly the best way
+
+Could do it by individual plat and average those together for each site.platform. I think this is a little different than how we've handled pin data, but I also think it might be appropriate, because the measurement unit is the individual plat. So we generate a rate for each plat within a site.platform, and average those three rates to get the site.platform rate. Then within a site, we average the three site.platform rates (which are also the 3 reps that we feed into an ANOVA).
+
+```{r, message=FALSE, warning=FALSE, fig.height=15, fig.width=7}
+markers4 <- mutate(markers4, site.platform.plat = paste0(site.platform, "-", plat))
+
+ggplot(markers4, aes(x=days_since_feldapp, y = avg_ht)) +
+    geom_point(aes(col=factor(ref_date)), size=2, alpha=0.6) +
+    geom_smooth(method="lm", se=FALSE) +
+    facet_wrap(~site.platform.plat, ncol=3) +
+    theme_bw() +
+    ggtitle("Marker Horizon Accumulations") +
+    xlab("# days since feldspar application") +
+    ylab("sediment height over feldspar")
+```
+
+```{r, message=FALSE, warning=FALSE, fig.height=15, fig.width=7}
+ggplot(markers4, aes(x=yrs_since_feldapp, y = avg_ht)) +
+    geom_point(aes(col=factor(ref_date)), size=2, alpha=0.6) +
+    geom_smooth(method="lm", se=FALSE) +
+    facet_wrap(~site.platform.plat, ncol=3) +
+    theme_bw() +
+    ggtitle("Marker Horizon Accumulations") +
+    xlab("# years since feldspar application") +
+    ylab("sediment height over feldspar")
+```
+
+***
+***
+***
+***
+
+## Time to generate some numbers
+
+### Start with the easy thing: Elevation Change (SET pin readings)
+
+The regression slopes by site.platform were generated earlier and are in the data frame `slopes`. Here it is again:
+
+```{r}
+kable(slopes)
+```
+
+Here is an ANOVA by site (in mm/yr), with a post-hoc Tukey's HSD. First, ANOVA:
+
+```{r}
+fit <- aov(mm.yr ~ site, data = slopes)
+summary(fit)
+anova(fit)
+```
+
+Now for the Tukey:
+
+```{r}
+# from library(agricolae)
+HSD.test(fit, 'site', console=TRUE)
+hsd <- HSD.test(fit, 'site')
+hsdgroups <- hsd$groups
+names(hsdgroups) <- c('site', 'mean_mm.yr', 'group')
+kable(hsdgroups)
+```
+
+
+#### Compare rates of elevation change to 0 and SLR   
+(are they changing?)
+(not 100% sure this is legit)
+
+two-sided t-tests using the three rates (in mm/day) at each site.
+
+p-values for both comparisons are given in this table.
+
+confidence intervals for rate of elevation change are given. Note that these CIs are much wider than those from the linear regressions, probably because of the small _n_.
+
+no adjustment for multiple comparisons has been made.
+
+SLR at Dauphin Island is 3.5 mm/yr 
+
+```{r}
+# need to group by site and run a t-test against slr_slope
+
+sites <- unique(slopes$site)
+test_slr <- data.frame(sitename = character(),
+                        sitemean = as.numeric(),
+                        pvalue_zero = as.numeric(),
+                        pvalue_slr = as.numeric(),
+                       conf.int.low = as.numeric(),
+                       conf.int.high = as.numeric(),
+                        stringsAsFactors = FALSE)
+
+
+for (i in 1:length(sites)) {
+    yo <- as.character(sites[i])
+    testslope <- slopes %>%
+        filter(site == yo) 
+    b <- t.test(as.numeric(testslope$mm.yr), alternative="two.sided", mu=0)
+    c <- t.test(as.numeric(testslope$mm.yr), alternative="two.sided", mu=3.5)
+    
+   test_slr[i,1] <- yo
+   test_slr[i,2] <- round(b$estimate, 5)
+   test_slr[i,3] <- round(b$p.value, 5)
+   test_slr[i,4] <- round(c$p.value, 5)
+   test_slr[i, 5:6] <- round(b$conf.int, 5)
+    
+}
+
+kable(test_slr)
+
+```
+
+***
+***
+
+
+### Okay, accretion rates.
+
+There are several methods I'd like to compare. But I'm going to start with what I think is the best way, which is using linear regression on sediment height as a function of # days since feldspar application. A slope will be calculated for each plat. Once this is done, the three plats for a site.platform will be averaged. Then the three slopes for site.platforms will be used to run ANOVA and Tukey by site, like we did with elevation change.
+
+
+First, generate those regressions.
+
+```{r}
+accrmodels <- markers4 %>%
+    group_by(site.platform.plat) %>%  
+    do(mod = lm(avg_ht ~ days_since_feldapp, data=.))
+
+accrcoefbysitepp <- tidy(accrmodels, mod, conf.int=TRUE, conf.level=0.95) # this gives the intercept, slope, and p values, among others; conf.int=TRUE, conf.level=0.95 gives the 95% confidence interval
+
+# make a slope per year for date estimate; NAs for intercept
+accrcoefbysitepp$mm.yr <- ifelse(accrcoefbysitepp$term == "days_since_feldapp", round(accrcoefbysitepp$estimate * 365.25, 3), "NA")
+
+# confidence intervals in mm/yr:
+accrcoefbysitepp$conf.low.yr <- ifelse(accrcoefbysitepp$term == "days_since_feldapp", round(accrcoefbysitepp$conf.low * 365.25, 3), "NA")
+accrcoefbysitepp$conf.high.yr <- ifelse(accrcoefbysitepp$term == "days_since_feldapp", round(accrcoefbysitepp$conf.high * 365.25, 3), "NA")
+
+accrsummarybysitepp <- glance(accrmodels, mod) # this gives r^2 and adjusted r^2, and p values, among others
+
+kable(accrcoefbysitepp)
+kable(accrsummarybysitepp)
+```
+
+
+Next, pull out the regression slopes into their own table.
+
+
+```{r}
+slopes.accr <- accrcoefbysitepp %>%
+    filter(term == 'days_since_feldapp') %>%
+    mutate(site = substr(site.platform.plat, 1, 4), 
+           mm.day = estimate,
+           site.platform = substr(site.platform.plat, 1, nchar(site.platform.plat)-2)) %>%
+    select(site.platform.plat, site.platform, site, mm.day, std.error, mm.yr, p.value) 
+slopes.accr$mm.yr <- as.numeric(slopes.accr$mm.yr)
+
+# need to split upper and lower juncus
+upper <- c("JURO_4", "JURO_5", "JURO_6")
+lower <- c("JURO_1", "JURO_2", "JURO_3")
+slopes.accr$site[slopes.accr$site.platform %in% upper] <- "UPJU"
+slopes.accr$site[slopes.accr$site.platform %in% lower] <- "LOJU"
+
+kable(slopes.accr)
+```
+
+
+Third, average the slopes within each site.platform and look at that table.
+
+```{r}
+slopes.accr.sp <- slopes.accr %>%
+    group_by(site.platform) %>%
+    summarize(rate.mm.yr = mean(mm.yr),
+              sd.rate.mm.yr = sd(mm.yr),
+              se.rate.mm.yr = sd(mm.yr)/sqrt(3)) %>%
+    mutate(site = substr(site.platform, 1, 4))
+
+# split upper and lower juncus
+upper <- c("JURO_4", "JURO_5", "JURO_6")
+lower <- c("JURO_1", "JURO_2", "JURO_3")
+slopes.accr.sp$site[slopes.accr.sp$site.platform %in% upper] <- "UPJU"
+slopes.accr.sp$site[slopes.accr.sp$site.platform %in% lower] <- "LOJU"
+
+kable(slopes.accr.sp)
+```
+
+And feed that into an ANOVA:
+
+```{r}
+fit <- aov(rate.mm.yr ~ site, data = slopes.accr.sp)
+summary(fit)
+anova(fit)
+```
+
+And Tukey:
+
+```{r}
+# from library(agricolae)
+HSD.test(fit, 'site', console=TRUE)
+hsd <- HSD.test(fit, 'site')
+hsdgroups <- hsd$groups
+names(hsdgroups) <- c('site', 'mean_mm.yr', 'group')
+kable(hsdgroups)
+```
+
+
+Will those averages come out differently per site.platform than just throwing all the points into one regression for site.platform?
+
+Here's one regression per site.platform:
+
+```{r}
+accrmodels <- markers4 %>%
+    group_by(site.platform) %>%  
+    do(mod = lm(avg_ht ~ days_since_feldapp, data=.))
+
+accrcoefbysitep <- tidy(accrmodels, mod, conf.int=TRUE, conf.level=0.95) # this gives the intercept, slope, and p values, among others; conf.int=TRUE, conf.level=0.95 gives the 95% confidence interval
+
+# make a slope per year for date estimate; NAs for intercept
+accrcoefbysitep$mm.yr <- ifelse(accrcoefbysitep$term == "days_since_feldapp", round(accrcoefbysitep$estimate * 365.25, 3), "NA")
+
+# confidence intervals in mm/yr:
+accrcoefbysitep$conf.low.yr <- ifelse(accrcoefbysitep$term == "days_since_feldapp", round(accrcoefbysitep$conf.low * 365.25, 3), "NA")
+accrcoefbysitep$conf.high.yr <- ifelse(accrcoefbysitep$term == "days_since_feldapp", round(accrcoefbysitep$conf.high * 365.25, 3), "NA")
+
+accrsummarybysitep <- glance(accrmodels, mod) # this gives r^2 and adjusted r^2, and p values, among others
+
+# kable(accrcoefbysitep)
+# kable(accrsummarybysitep)
+
+# pull into own table
+
+slopes.accrp <- accrcoefbysitep %>%
+    filter(term == 'days_since_feldapp') %>%
+    mutate(site = substr(site.platform, 1, 4), 
+           mm.day = estimate) %>%
+    select(site.platform, site, mm.day, std.error, mm.yr, p.value) 
+slopes.accrp$mm.yr <- as.numeric(slopes.accrp$mm.yr)
+
+# need to split upper and lower juncus
+upper <- c("JURO_4", "JURO_5", "JURO_6")
+lower <- c("JURO_1", "JURO_2", "JURO_3")
+slopes.accrp$site[slopes.accrp$site.platform %in% upper] <- "UPJU"
+slopes.accrp$site[slopes.accrp$site.platform %in% lower] <- "LOJU"
+
+kable(slopes.accrp)
+
+```
+
+
+See if models come out differently (running these because Tukey spits out the site average and I want to do it all at once because I'm lazy):
+
+ANOVA:
+
+```{r}
+fit <- aov(mm.yr ~ site, data = slopes.accrp)
+summary(fit)
+anova(fit)
+```
+
+And Tukey:
+
+```{r}
+# from library(agricolae)
+HSD.test(fit, 'site', console=TRUE)
+hsd <- HSD.test(fit, 'site')
+hsdgroups <- hsd$groups
+names(hsdgroups) <- c('site', 'mean_mm.yr', 'group')
+kable(hsdgroups)
+```
+
+
+## Generate a simpler table with rates for both elevation change and accretion
+
+```{r, message=FALSE, warning=FALSE}
+
+# make the punctuation the same in both data frames (turn marker summary ones from CLMAJ_1 to CLMAJ-1 etc.); specify that it's a factor
+slopes.accrp$site.platform <- factor(sub("_", "-", slopes.accrp$site.platform))
+
+elev <- slopes %>%
+    mutate(elev.mm.yr = mm.yr) %>%
+    select(site.platform, site, elev.mm.yr)
+accr <- slopes.accrp %>%
+    mutate(accr.mm.yr = mm.yr) %>%
+    select(site.platform, site, accr.mm.yr)
+
+rates_all <- full_join(elev, accr)
+kable(rates_all)
+```
+
+### And a summary by site
+
+```{r}
+rates_bysite <- rates_all %>%
+    group_by(site) %>%
+    summarize(elev.rate = round(mean(elev.mm.yr), 2),
+           elev.sd = round(sd(elev.mm.yr), 3),
+           elev.se = round(elev.sd/sqrt(3), 3),
+           accr.rate = round(mean(accr.mm.yr), 2),
+           accr.sd = round(sd(accr.mm.yr), 3),
+           accr.se = round(accr.sd/sqrt(3), 3))
+
+kable(rates_bysite)
+```
+

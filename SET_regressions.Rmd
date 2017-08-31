@@ -1,0 +1,229 @@
+---
+title: "SET Regressions"
+date: "`r Sys.Date()`"
+output: 
+    html_document:
+        keep_md: true
+        code_folding: 'hide'
+        fig_width: 8
+        fig_height: 6
+---
+
+__Note__: R code in this document is hidden by default, but the chunks used for each step that follows can be viewed by clicking "code" on the right side of the file.   
+   
+### Setup & Data Prep   
+   
+1. Loading data that was processed via `SET_processing_and_summarizing.R` script; available here: https://github.com/swmpkim/Sentinel_Sites/blob/master/SET_processing_and_summarizing.R   
+
+2. Processing some NAVD88 information to calculate an adjustment factor for pin heights: NAVD88 location of marsh surface = total measured height (leveled SET + leveled adapter + pin reading) - pin length (0.756m)
+    - __Note__: 0.756 as pin length needs to be verified with Will U.
+
+3. Subtracting first pin reading (actually the average of 36 readings) at a platform (e.g., JURO-1) from all subsequent readings to generate change over time.
+
+4. Creating a column for site:   
+    -  __CLMA = Cladium:__
+        - CLMAJ-1 
+        - CLMAJ-2 
+        - CLMAJ-3
+    -  __PANN = Panne:__
+        - PANNE-1
+        - PANNE-2
+        - PANNE-3
+    -  __LOJU = Lower Juncus:__
+        - JURO-1
+        - JURO-2
+        - JURO-3
+    -  __UPJU = Upper Juncus:__
+        - JURO-4
+        - JURO-5
+        - JURO-6
+    -  __SPAL = Spartina:__
+        - SPAL-1
+        - SPAL-2
+        - SPAL-3
+
+5. Calculating NAVD-88 adjusted pin heights
+
+```{r, message=FALSE, warning=FALSE}
+library(reshape2)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(broom)
+# load group of files, generated from SET_summarizing.R
+load("sets.group.R")
+
+# set up a NAVD88 data frame
+NAVD88 <- read.csv("NAVD88.csv")
+# calculate the adjustment factor that will need to be applied to pin heights:
+### total height (set + adapter + reading) - pin length (0.756) = NAVD88 location of marsh surface
+NAVD88 <- mutate(NAVD88, totalfactor = SET_NAVD88 + Adapter_NAVD88 - 0.756)
+
+# subtract first reading at a platform from all subsequent readings
+# split, apply, combine
+pin_split <- split(pin_summary, pin_summary$site.platform) %>%
+    lapply(., FUN = function(x) {mutate(x, "change" = mean - mean[1])})
+pin_change <- do.call(rbind, pin_split) %>%
+    mutate(., site = substr(site.platform, 1, 4))
+
+# need to split upper and lower juncus
+# JURO1-3 is lower
+# 4-6 is upper
+upper <- c("JURO-4", "JURO-5", "JURO-6")
+lower <- c("JURO-1", "JURO-2", "JURO-3")
+pin_change$site[pin_change$site.platform %in% upper] <- "UPJU"
+pin_change$site[pin_change$site.platform %in% lower] <- "LOJU"
+
+# calculate NAVD-adjusted pin heights
+# first add the adjustment factor to the data frame
+pin_change$navdadj <- NAVD88$totalfactor[match(pin_change$site.platform, NAVD88$Site)]
+
+# then calculate the adjusted value
+# BEWARE - the units are different. turn this all into meters.
+pin_change <- mutate(pin_change, meanadj = (mean/1000) + navdadj)
+```
+   
+   
+In the data frame `pin_change`, we now have the following columns:   
+   
+- __site.platform__ - the individual SET platform, e.g. CLMAJ-1
+- __date__ - date of pin reading
+- __mean__ - mean of 36 pin readings on that date
+- __stddev__ - standard deviation of 36 pin readings on that date
+- __stderr__ - standard error of the mean for 36 in readings on that date
+- __site__ - site that the SET platform belongs to, e.g. CLMA
+- __sdymin__ - ymin for plotting error bars using standard deviation (mean - stddev)
+- __sdymax__ - ymax for plotting error bars using standard deviation (mean + stddev)
+- __seymin__ - ymin for plotting error bars using standard error (mean - stderr)
+- __seymax__ - ymax for plotting error bars using standard error (mean + stderr)
+- __change__ - change (mm) since first reading
+- __navdadj__ - adjustment factor to relate mean pin readings to NAVD88; calculated for each individual site.platform
+- __meanadj__ - mean marsh elevation (m) relative to NAVD88 on the sample date: mean of 36 pin readings, converted to m, plus the adjustment factor for the individual site.platform
+   
+   
+Here are the first and last 3 rows of the data frame we're working with:   
+   
+```{r}
+library(knitr)
+kable(head(pin_change, 3))
+kable(tail(pin_change, 3))
+```
+
+
+***
+
+### Regressions
+
+
+__Change over time at each individual platform, plus regression lines, compared to SLR__
+
+Faceted by site because it's a little too crowded otherwise. The line is the regression for the site (e.g. CLMA; n=3 platforms per site). Reminder: all sites start at 0.
+
+
+Local sea level rise at Dauphin Island is 3.5 mm/yr (source:  https://tidesandcurrents.noaa.gov/sltrends/sltrends_station.shtml?stnid=8735180 ). That is the gray dashed line in the following graphs. The intercept was set so the line would go through y=0 on the same date where pin change is 0.
+
+
+Here are the slopes (and other regression outputs) for each site. Slopes were calculated in mm/day by default; look to the right-most columns for mm/yr, which I calculated.
+
+#### Important note
+
+I screwed up parentheses in the calculations for the original tables I sent, so those mm/yr slopes and confidence intervals are INCORRECT. The following calculations have been corrected.
+
+```{r}
+models <- pin_change %>%
+    group_by(site) %>%  
+    do(mod = lm(change ~ date, data=.))
+
+modelcoefbysite <- tidy(models, mod, conf.int=TRUE, conf.level=0.95) # this gives the intercept, slope, and p values, among others; conf.int=TRUE, conf.level=0.95 gives the 95% confidence interval
+
+# make a slope per year for date estimate; NAs for intercept
+modelcoefbysite$mm.yr <- ifelse(modelcoefbysite$term == "date", round((modelcoefbysite$estimate * 4 * 365 + 1)/4, 3), "NA")
+
+# confidence intervals in mm/yr:
+modelcoefbysite$conf.low.yr <- ifelse(modelcoefbysite$term == "date", round(modelcoefbysite$conf.low * 365.25, 3), "NA")
+modelcoefbysite$conf.high.yr <- ifelse(modelcoefbysite$term == "date", round(modelcoefbysite$conf.high * 365.25, 3), "NA")
+
+modelsummarybysite <- glance(models, mod) # this gives r^2 and adjusted r^2, and p values, among others
+
+kable(modelcoefbysite)
+kable(modelsummarybysite)
+```
+
+
+#### Let's see those regressions on a plot.
+
+
+```{r}
+# to get that into rise per day, accounting for leap year:
+slr_slope <- 3.5/365.25
+# and intercept, because time 0 is at 1970-01-01 and we want line to go through 0
+slr_int <- 0 - slr_slope*as.integer(pin_change[1,]$date)
+
+ggplot(pin_change, aes(x=date, y=change)) +
+    geom_point(aes(col=site.platform), alpha=0.5, size=3) +
+    geom_smooth(method="lm", aes(group=site, col=site), show.legend=FALSE) +
+    geom_abline(slope=slr_slope, intercept = slr_int, lty=2, lwd=1.5, alpha=0.7) +
+    theme_minimal() +
+    facet_wrap(~site, nrow=2) +
+    ggtitle("Cumulative Surface Elevation Change") +
+    ylab("change (mm)")
+```
+
+
+#### Now go site by site and look at diagnostics, particularly residual plots.
+
+
+Split the data frame so each site has its own.
+
+```{r}
+spal <- filter(pin_change, site=="SPAL")
+pann <- filter(pin_change, site=="PANN")
+upju <- filter(pin_change, site=="UPJU")
+loju <- filter(pin_change, site=="LOJU")
+clma <- filter(pin_change, site=="CLMA")
+
+```
+
+
+#### SPAL
+
+Here's something interesting: running regressions for `change` and `mean` (mean pin height) against `date` give the same slope, as they should, but different standard errors, t values, and p-values. Also, different R^2s.
+
+```{r}
+fit <- lm(change ~ date, data=spal)
+fit2 <- lm(mean ~ date, data=spal)
+fit3 <- lm(I(meanadj * 1000) ~ date, data=spal)
+
+summary(fit)
+# summary(fit2)
+summary(fit3)
+
+plot(spal$date, residuals(fit), xlab="date", main="residuals from fit of change")
+abline(0,0)
+
+plot(spal$date, residuals(fit3), xlab="date", main="residuals from fit of NAVD- adjusted mean")
+abline(0,0)
+
+# plot(spal$date, residuals(fit2), xlab="date", main="residuals from fit of mean")
+# abline(0,0)
+
+```
+
+
+#### Upper Juncus
+
+```{r}
+fit <- lm(change ~ date, data=upju)
+fit2 <- lm(mean ~ date, data=upju)
+
+summary(fit)
+summary(fit2)
+
+plot(upju$date, residuals(fit), xlab="date", main="residuals from fit of change")
+abline(0,0)
+
+plot(upju$date, residuals(fit2), xlab="date", main="residuals from fit of mean")
+abline(0,0)
+
+```
+

@@ -1,3 +1,4 @@
+
 ---
 title: "SETs"
 date: "`r Sys.Date()`"
@@ -45,11 +46,13 @@ __Note__: R code in this document is hidden by default, but the chunks used for 
 5. Calculating NAVD-88 adjusted pin heights
 
 ```{r, message=FALSE, warning=FALSE}
+library(agricolae)
 library(reshape2)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
 library(broom)
+library(knitr)
 # load group of files, generated from SET_summarizing.R
 load("sets.group.R")
 
@@ -104,7 +107,7 @@ In the data frame `pin_change`, we now have the following columns:
 Here are the first and last 3 rows of the data frame we're working with:   
    
 ```{r}
-library(knitr)
+
 kable(head(pin_change, 3))
 kable(tail(pin_change, 3))
 ```
@@ -145,6 +148,10 @@ Here are the slopes (and other regression outputs) for each site. Slopes were ca
 
 I screwed up parentheses in the calculations for the original tables I sent, so those mm/yr slopes and confidence intervals are INCORRECT. The following calculations have been corrected.
 
+## Regression output by site
+
+n=3 within each site
+
 ```{r}
 models <- pin_change %>%
     group_by(site) %>%  
@@ -164,7 +171,219 @@ modelsummarybysite <- glance(models, mod) # this gives r^2 and adjusted r^2, and
 kable(modelcoefbysite)
 kable(modelsummarybysite)
 ```
+
 ***
+
+## Regression output by individual platform
+
+
+
+```{r}
+models <- pin_change %>%
+    group_by(site.platform) %>%  
+    do(mod = lm(change ~ date, data=.))
+
+modelcoefbysite <- tidy(models, mod, conf.int=TRUE, conf.level=0.95) # this gives the intercept, slope, and p values, among others; conf.int=TRUE, conf.level=0.95 gives the 95% confidence interval
+
+# make a slope per year for date estimate; NAs for intercept
+modelcoefbysite$mm.yr <- ifelse(modelcoefbysite$term == "date", round(modelcoefbysite$estimate * 365.25, 3), "NA")
+
+# confidence intervals in mm/yr:
+modelcoefbysite$conf.low.yr <- ifelse(modelcoefbysite$term == "date", round(modelcoefbysite$conf.low * 365.25, 3), "NA")
+modelcoefbysite$conf.high.yr <- ifelse(modelcoefbysite$term == "date", round(modelcoefbysite$conf.high * 365.25, 3), "NA")
+
+modelsummarybysite <- glance(models, mod) # this gives r^2 and adjusted r^2, and p values, among others
+
+kable(modelcoefbysite)
+kable(modelsummarybysite)
+```
+
+
+## Table of regression slopes only
+
+```{r}
+slopes <- modelcoefbysite %>%
+    filter(term == 'date') %>%
+    mutate(site = substr(site.platform, 1, 4), mm.day = estimate) %>%
+    select(site.platform, site, mm.day, mm.yr, std.error, p.value) 
+slopes$mm.yr <- as.numeric(slopes$mm.yr)
+
+# need to split upper and lower juncus
+upper <- c("JURO-4", "JURO-5", "JURO-6")
+lower <- c("JURO-1", "JURO-2", "JURO-3")
+slopes$site[slopes$site.platform %in% upper] <- "UPJU"
+slopes$site[slopes$site.platform %in% lower] <- "LOJU"
+
+kable(slopes)
+```
+
+
+## Run an ANOVA on these slopes
+
+```{r}
+fit <- aov(mm.day ~ site, data = slopes)
+
+library(nlme)
+fit_a <- aov(mm.yr ~ site, data = slopes)
+anova(fit_a)
+
+fit2_a <- lme(mm.yr ~ site, data = slopes, random = ~1|site.platform)
+summary(fit2_a)
+anova(fit2_a)
+
+fittest <- lme(mm.yr ~ site+p.value, data = slopes, random = ~1|mm.day)
+summary(fittest)
+anova(fittest)
+```
+
+See the output:
+
+```{r}
+summary(fit)
+```
+
+Yes, significant differences between sites. Post-hoc Tukey's test:
+
+```{r}
+# from library(agricolae)
+HSD.test(fit, 'site', console=TRUE)
+hsd <- HSD.test(fit, 'site')
+hsdgroups <- hsd$groups
+names(hsdgroups) <- c('site', 'mean_mm.day', 'group')
+kable(hsdgroups)
+```
+
+
+### Compare slopes to 0 and SLR   
+(are they changing?)
+
+two-sided t-tests using the three slopes (in mm/day) at each site.
+
+no adjustment for multiple comparisons has been made.
+
+SLR at Dauphin Island is 3.5 mm/yr = `r round(3.5/365.25, 5)` mm/day  
+
+```{r}
+# need to group by site and run a t-test against slr_slope
+
+sites <- unique(slopes$site)
+test_slr <- data.frame(sitename = character(),
+                        sitemean = as.numeric(),
+                        pvalue_zero = as.numeric(),
+                        pvalue_slr = as.numeric(),
+                       conf.int.low = as.numeric(),
+                       conf.int.high = as.numeric(),
+                        stringsAsFactors = FALSE)
+
+
+for (i in 1:length(sites)) {
+    yo <- as.character(sites[i])
+    testslope <- slopes %>%
+        filter(site == yo) 
+    b <- t.test(testslope$mm.day, alternative="two.sided", mu=0)
+    c <- t.test(testslope$mm.day, alternative="two.sided", mu=slr_slope)
+    
+   test_slr[i,1] <- yo
+   test_slr[i,2] <- round(b$estimate, 5)
+   test_slr[i,3] <- round(b$p.value, 5)
+   test_slr[i,4] <- round(c$p.value, 5)
+   test_slr[i, 5:6] <- round(b$conf.int, 5)
+    
+}
+
+kable(test_slr)
+
+```
+
+
+### takeaways
+
+PANNE is not keeping up with SLR (p = 0.0021). Other sites are not significantly different from SLR, so we can infer that their elevation changes are keeping up; but cannot infer that they are exceeding the rate of SLR.
+
+******
+******
+******
+******
+
+## Do all of the above using mm/yr instead of mm/day
+
+## Run an ANOVA on these slopes
+
+```{r}
+fit <- aov(mm.yr ~ site, data = slopes)
+```
+
+See the output:
+
+```{r}
+summary(fit)
+```
+
+Yes, significant differences between sites. Post-hoc Tukey's test:
+
+```{r}
+# from library(agricolae)
+HSD.test(fit, 'site', console=TRUE)
+hsd <- HSD.test(fit, 'site')
+hsdgroups <- hsd$groups
+names(hsdgroups) <- c('site', 'mean_mm.day', 'group')
+kable(hsdgroups)
+```
+
+
+### Compare slopes to 0 and SLR   
+(are they changing?)
+
+two-sided t-tests using the three slopes (in mm/day) at each site.
+
+confidence intervals are given. Note that these CIs are much wider than those from the linear regressions, probably because of the small _n_.
+
+no adjustment for multiple comparisons has been made.
+
+SLR at Dauphin Island is 3.5 mm/yr = `r round(3.5/365.25, 5)` mm/day  
+
+```{r}
+# need to group by site and run a t-test against slr_slope
+
+sites <- unique(slopes$site)
+test_slr <- data.frame(sitename = character(),
+                        sitemean = as.numeric(),
+                        pvalue_zero = as.numeric(),
+                        pvalue_slr = as.numeric(),
+                       conf.int.low = as.numeric(),
+                       conf.int.high = as.numeric(),
+                        stringsAsFactors = FALSE)
+
+
+for (i in 1:length(sites)) {
+    yo <- as.character(sites[i])
+    testslope <- slopes %>%
+        filter(site == yo) 
+    b <- t.test(as.numeric(testslope$mm.yr), alternative="two.sided", mu=0)
+    c <- t.test(as.numeric(testslope$mm.yr), alternative="two.sided", mu=3.5)
+    
+   test_slr[i,1] <- yo
+   test_slr[i,2] <- round(b$estimate, 5)
+   test_slr[i,3] <- round(b$p.value, 5)
+   test_slr[i,4] <- round(c$p.value, 5)
+   test_slr[i, 5:6] <- round(b$conf.int, 5)
+    
+}
+
+kable(test_slr)
+
+```
+
+
+### takeaways
+
+PANNE is not keeping up with SLR (p = 0.0021). Other sites are not significantly different from SLR, so we can infer that their elevation changes are keeping up; but cannot infer that they are exceeding the rate of SLR.
+
+******
+******
+******
+******
+
 
 ### Plots of elevation relative to NAVD88
 
