@@ -1,0 +1,291 @@
+---
+title: "Interactive SET/MH graphs"
+date: "`r Sys.Date()`"
+output: 
+    html_document:
+        keep_md: true
+        code_folding: 'hide'
+        fig_width: 5
+        fig_height: 3
+---
+
+***
+***
+
+
+These .csv files have been run through a few steps before getting to this point.  
+
+The raw SET-pin data and Marker Horizon data spreadsheets were imported into R and changed into a long format. For SET-pin data, this happened in `SET_processing_and_summarizing.R`. That file was further run through `SETs.Rmd` to format correctly, etc.; then through `wide_format_conversion.R` to get it into wide format (individual SET tables and sample dates as row identifiers; arm-pin as column identifiers).
+
+Marker horizons were read in through the `SETs plus MHs.Rmd` file, then run through `wide_format_conversion.R` to get into wide format with SET table and sample dates as row identifiers, and plat-rep (e.g. 1-A) as column names.
+
+Once the files were in wide format, with only one row per site and date, I went through the field notebooks and corrected any date discrepancies.
+
+This file will read the files with corrected dates back into R make interactive graphs using the `dygraphs` and/or `ggiraph` packages.
+
+Note: `markers_with_references.csv` is the file with all correct dates and 0s for every re-laying of feldspar.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+library(broom)
+library(knitr)
+library(agricolae)
+library(dygraphs)
+library(xts)
+library(htmltools)
+library(ggplot2)
+library(ggiraph)
+```
+
+### Read in data
+
+```{r, message=FALSE, warning=FALSE}
+sets <- read.csv("sets_wide_corrected.csv", stringsAsFactors = FALSE) %>%
+    mutate(date = mdy(date)) %>%
+    gather(key = arm.pin, value = pin_height, -site.platform, -date) %>%
+    mutate(arm.pin = sub('.', '', arm.pin)) %>%
+    arrange(site.platform, date)
+
+    
+markers <- read.csv("markers_with_references.csv", stringsAsFactors = FALSE) %>%
+    mutate(date = mdy(date), plat=paste0("plat", plat)) %>%
+    group_by(site.platform, plat, date) %>%
+    mutate(sed_height = mean(c(A, B, C, D), na.rm=TRUE)) %>%
+    select(site.platform, plat, date, sed_height) %>%
+    distinct() %>%
+    spread(key = plat, value = sed_height)
+
+feldspar_relays <- read.csv("markers_with_references.csv", stringsAsFactors = FALSE) %>%
+    mutate(date = mdy(date), 
+           ref_date = mdy(ref_date),
+           plat=paste0("relay", plat), 
+           ref = 0) %>%
+    select(site.platform, plat, ref_date, ref) %>%
+    distinct() %>%
+    spread(key = plat, value = ref)
+    
+```
+
+
+### Work up some summaries
+
+#### Pin readings:  
+
+*  group by site.platform and date; calculate mean, st deviation, st error  
+*  subtract first reading at site from all subsequent readings. NOTE that `pin_change$change` is elevation change, in mm, relative to the first reading, which is on or around 2-29-2012 at all sites.  
+*  add column for overall site names (e.g. UPJU = Upper Juncus = JURO-4, JURO-5, and JURO-6)
+
+```{r}
+# group by platform and date, then calculate mean and standard deviation
+pin_summary <- dplyr::summarize(group_by(sets, site.platform, date), mean = mean(pin_height, na.rm=TRUE), stddev = sd(pin_height, na.rm=TRUE), stderr = stddev/sqrt(length(pin_height))) 
+
+# subtract first reading at a platform from all subsequent readings
+# split, apply, combine
+pin_split <- split(pin_summary, pin_summary$site.platform) %>%
+    lapply(., FUN = function(x) {mutate(x, "change" = mean - mean[1])})
+pin_change <- do.call(rbind, pin_split) %>%
+    mutate(., site = substr(site.platform, 1, 4))
+
+# need to split upper and lower juncus
+# JURO1-3 is lower
+# 4-6 is upper
+upper <- c("JURO-4", "JURO-5", "JURO-6")
+lower <- c("JURO-1", "JURO-2", "JURO-3")
+pin_change$site[pin_change$site.platform %in% upper] <- "UPJU"
+pin_change$site[pin_change$site.platform %in% lower] <- "LOJU"
+
+# clean up the temporary files
+rm(pin_summary)
+rm(pin_split)
+rm(lower)
+rm(upper)
+```
+
+NAVD-88 adjustments:
+
+```{r}
+# set up a NAVD88 data frame
+NAVD88 <- read.csv("NAVD88.csv")
+# calculate the adjustment factor that will need to be applied to pin heights:
+### total height (set + adapter + reading) - pin length (0.756) = NAVD88 location of marsh surface
+NAVD88 <- mutate(NAVD88, totalfactor = SET_NAVD88 + Adapter_NAVD88 - 0.756)
+
+# calculate NAVD-adjusted pin heights
+# first add the adjustment factor to the data frame
+pin_change$navdadj <- NAVD88$totalfactor[match(pin_change$site.platform, NAVD88$Site)]
+
+# then calculate the adjusted value
+# BEWARE - the units are different. turn this all into meters.
+pin_change <- mutate(pin_change, meanadj = (mean/1000) + navdadj)
+```
+
+
+
+#### Marker Horizons:
+
+```{r}
+# give it sites:
+markers <- mutate(markers, site = substr(site.platform, 1, 4))
+
+# need to split upper and lower juncus
+# JURO1-3 is lower
+# 4-6 is upper
+upper <- c("JURO_4", "JURO_5", "JURO_6")
+lower <- c("JURO_1", "JURO_2", "JURO_3")
+markers$site[markers$site.platform %in% upper] <- "UPJU"
+markers$site[markers$site.platform %in% lower] <- "LOJU"
+
+rm(upper)
+rm(lower)
+
+```
+
+Marker Horizon Sample Dates
+
+```{r}
+# kable(markerdates)
+```
+
+SET Sample Dates
+
+```{r}
+# kable(setdates)
+```
+
+
+### Glue together marker horizon and pin change data
+
+First have to generate mean accretion, stdev, and sterr for each platform
+
+```{r, message=FALSE, warning=FALSE}
+# make the punctuation the same in both data frames (turn marker summary ones from CLMAJ_1 to CLMAJ-1 etc.); specify that it's a factor
+markers$site.platform <- factor(sub("_", "-", markers$site.platform))
+
+feldspar_relays$site.platform <- factor(sub("_", "-", feldspar_relays$site.platform))
+
+# join
+dat_almost <- full_join(pin_change, markers, by=c("site.platform", 'date'))
+
+dat_all <- full_join(dat_almost, feldspar_relays, by=c("site.platform", "date" = "ref_date"))
+```
+
+Update some names; select only pin and MH readings; turn it into a time series object
+
+```{r}
+dat_small <- dat_all %>%
+    mutate(pins = change, markers1 = plat1, markers2 = plat2, markers3 = plat3) %>%
+    select(site.platform, date, pins, markers1, markers2, markers3, relay1, relay2, relay3)
+dat_small <- xts(dat_small, order.by = dat_small$date)
+
+```
+
+***
+***
+
+### Dygraphs!
+
+Commented out because I can fine-tune the plots from `ggiraph` more easily. (don't want to lose this code though!)
+
+Needs a bit of cleanup, but notice you can hover over a point and see the values; you can also change the range to zoom in on an area. Because of how it's graphed, you can see when a series isn't continuous - which would indicate either NAs for MHs or mismatched dates between pin and MH measurements.
+
+
+```{r, fig.width=7, fig.height=4}
+### NOTE: I've changed the marker horizons since writing this. There is no longer an "average" per date; I'm using all three plats, so the code will need updating.
+
+
+# # for loops and html widgets don't play nice together, so I've had to split the data frame, write my own function, and use lapply and htmltools to generate a plot for each site.platform
+
+
+# # here's the function
+# set_interact <- function(dat_split){
+#     dygraph(data = dat_split, main = as.character(unique(dat_split$site.platform)), xlab="Date", ylab="mm") %>%
+#         dySeries("pins", label = "SET pins", drawPoints = TRUE, pointSize = 4, color = "blue") %>%
+#         dySeries("markers", label = "Marker Horizons", drawPoints = TRUE, pointSize = 4, color = "red") %>%
+#         dyRangeSelector()
+# }
+# 
+# # here's the data frame splitting
+# sets_split <- split(dat_small, dat_small$site.platform)
+# 
+# # aaaaand lapply
+# # which needs to be wrapped in htmltools, per Yihui
+# # https://stackoverflow.com/questions/30509866/for-loop-over-dygraph-does-not-work-in-r
+# toprint <- lapply(sets_split, set_interact)
+# 
+# # although we also need space between the graphs, so here's a solution
+# # https://stackoverflow.com/questions/38109020/how-do-i-add-spacing-between-dygraphs-generated-in-apply-loop-in-rmarkdown
+# 
+# space <- list(htmltools::tags$h1("--------"), 
+#               htmltools::tags$h2("--------"))
+# 
+# out <- c(rbind(space, toprint))
+# 
+# 
+# # and print it out
+# htmltools::tagList(out)
+
+
+```
+
+
+## Interactive plots using ggplot2 and ggiraph
+
++  Hovering over a point will show the date and the reading.  
++  You can also pan and zoom in on a graph by using the buttons that appear in its upper right corner when you hover over the plot area.
++  The blue points and lines are averages of SET pin data. I wanted this to be the most noticeable grouping because these graphs have a lot going on - so the points are solid, but mostly transparent, so you can see what's happening with the triangles.
++  The triangles are averages from each of 3 individual MH plots for each SET.
++  Filled-in triangles (at y=0) represent dates when feldspar was applied or reapplied. You will notice that on some dates, it was only reapplied at one of the three plots; this is what prevents me from averaging across all plots on all dates.  
++  __Breaks in the lines__ represent either missing data (most likely NAs on the MHs) OR __dates when SET and MH readings were done on different days__. Usually they are only separated by 1-3 days, but there is at least one instance when the two readings for a quarter were done more than a month apart.  
+
+
+
+```{r, message=FALSE, warning=FALSE}
+
+
+# make columns of date and measurement for the tooltip
+# first, remake dat_small; not as a time-series object
+dat_small <- dat_all %>%
+    mutate(pins = change, markers1 = plat1, markers2 = plat2, markers3 = plat3) %>%
+    select(site.platform, date, pins, markers1, markers2, markers3, relay1, relay2, relay3)
+
+dat_small <- dat_small %>%
+    mutate(pin_caption = paste0(date, ": ", round(pins,2), " mm"),
+           mh1_caption = paste0(date, ": ", round(markers1, 2), " mm"),
+           mh2_caption = paste0(date, ": ", round(markers2, 2), " mm"),
+           mh3_caption = paste0(date, ": ", round(markers3, 2), " mm"))
+
+# split the data
+sets_split <- split(dat_small, dat_small$site.platform)
+
+
+set_gginteract <- function(dat_split){
+g <- ggplot(dat_split, aes(x=date)) +
+    geom_point_interactive(aes(y=pins, tooltip=pin_caption, col="SET pins"), alpha = 0.3, size = 4, shape = 16) +
+    geom_point_interactive(aes(y=markers1, tooltip=mh1_caption, col="Marker Horizons 1"), size = 3, shape = 2) +
+    geom_point_interactive(aes(y=markers2, tooltip=mh2_caption, col="Marker Horizons 2"), size = 3, shape = 2) +
+    geom_point_interactive(aes(y=markers3, tooltip=mh3_caption, col="Marker Horizons 3"), size = 3, shape = 2) +
+    geom_point(aes(y=relay1, col="Marker Horizons 1"), size = 3, shape = 17, alpha = 0.8) +
+    geom_point(aes(y=relay2, col="Marker Horizons 2"), size = 3, shape = 17, alpha = 0.8) +
+    geom_point(aes(y=relay3, col="Marker Horizons 3"), size = 3, shape = 17, alpha = 0.8) +
+    geom_line(aes(y=pins, col="SET pins")) +
+    geom_line(aes(y=markers1, col="Marker Horizons 1"), alpha = 0.5) +
+    geom_line(aes(y=markers2, col="Marker Horizons 2"), alpha = 0.5) +
+    geom_line(aes(y=markers3, col="Marker Horizons 3"), alpha = 0.5) +
+    theme_bw() +
+    labs(title = as.character(unique(dat_split$site.platform)), x ="Date", y = "mm") +
+    scale_color_manual(values = c("SET pins" = "blue", "Marker Horizons 1" = "red", "Marker Horizons 2" = "orange", "Marker Horizons 3" = "darkslategray"))
+
+ggiraph(code = print(g + theme(legend.position='bottom')), width_svg = 10, tooltip_opacity = 0.8, zoom_max = 10)
+}
+
+# aaaaand lapply
+# which needs to be wrapped in htmltools, per Yihui
+# https://stackoverflow.com/questions/30509866/for-loop-over-dygraph-does-not-work-in-r
+toprint <- lapply(sets_split, set_gginteract)
+
+# don't really need the contortions for spacing that we had above, so just print it out
+htmltools::tagList(toprint)
+```
+

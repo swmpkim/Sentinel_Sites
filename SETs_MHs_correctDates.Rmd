@@ -364,7 +364,7 @@ markers3 <- markers3 %>%
 kable(head(markers3, 10))
 ```
 
-Calculate some rates for every date and check out that same example data.
+Calculate some rates for every date and check out that same example data.(commented out except for making the new data frame)
 
 ```{r}
 markers4 <- markers3 %>%
@@ -376,11 +376,11 @@ markers4 <- markers3 %>%
            days_since_feldapp = as.numeric(date - ref_date),
            yrs_since_feldapp = days_since_feldapp/365.25,
            mm.yr_since_prev = mm_since_prev/days_since_prev * 365.25)
-
-example <- markers4 %>%
-    filter(site.platform == "CLMAJ_3", plat == "2")
-
-kable(example)
+# 
+# example <- markers4 %>%
+#     filter(site.platform == "CLMAJ_3", plat == "2")
+# 
+# kable(example)
 ```
 
 I guess... just average the rates and see how they compare? Cumulative accretion feeding into a linear regression will be a different process.
@@ -449,57 +449,58 @@ PANNE-1 Plat 1 is bothering me (see emails for details). What happens if we excl
 
 
 
-### Some box plots
+### Some box plots  
+commented out
 
 ```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=10}
-a <- ggplot(markers4) +
-    geom_boxplot(aes(x=site.platform, y=mm.yr_since_prev, col=site.platform)) +
-    theme_bw() +
-    theme(legend.position="none") +
-    ggtitle("rates since previous")
-
-b <- ggplot(markers4) +
-    geom_boxplot(aes(x=site.platform, y=mm.yr_since_feldapp, col=site.platform)) +
-    theme_bw() +
-    theme(legend.position="none") +
-    ggtitle("rates since time 0")
-
-c <- ggplot(markers4) +
-    geom_boxplot(aes(x=site.platform, y=mm_since_prev, col=site.platform)) +
-    theme_bw() +
-    theme(legend.position="none") +
-    ggtitle("accumulation over 3 months")
-
-library(gridExtra)
-grid.arrange(a,b,c, ncol=1)
+# a <- ggplot(markers4) +
+#     geom_boxplot(aes(x=site.platform, y=mm.yr_since_prev, col=site.platform)) +
+#     theme_bw() +
+#     theme(legend.position="none") +
+#     ggtitle("rates since previous")
+# 
+# b <- ggplot(markers4) +
+#     geom_boxplot(aes(x=site.platform, y=mm.yr_since_feldapp, col=site.platform)) +
+#     theme_bw() +
+#     theme(legend.position="none") +
+#     ggtitle("rates since time 0")
+# 
+# c <- ggplot(markers4) +
+#     geom_boxplot(aes(x=site.platform, y=mm_since_prev, col=site.platform)) +
+#     theme_bw() +
+#     theme(legend.position="none") +
+#     ggtitle("accumulation over 3 months")
+# 
+# library(gridExtra)
+# grid.arrange(a,b,c, ncol=1)
 ```
 
 ### Those same box plots with different y-scaling
 
 ```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=10}
-a <- ggplot(markers4) +
-    geom_boxplot(aes(x=site.platform, y=mm.yr_since_prev, col=site.platform)) +
-    theme_bw() +
-    theme(legend.position="none") +
-    coord_cartesian(ylim=c(-50, 50)) +
-    ggtitle("accretion rates since previous reading")
-
-b <- ggplot(markers4) +
-    geom_boxplot(aes(x=site.platform, y=mm.yr_since_feldapp, col=site.platform)) +
-    theme_bw() +
-    theme(legend.position="none") +
-    coord_cartesian(ylim=c(-10, 25)) +
-    ggtitle("accretion rates since time 0")
-
-c <- ggplot(markers4) +
-    geom_boxplot(aes(x=site.platform, y=mm_since_prev, col=site.platform)) +
-    theme_bw() +
-    theme(legend.position="none") +
-    coord_cartesian(ylim=c(-10, 25)) +
-    ggtitle("accretion over 3 months")
-
-library(gridExtra)
-grid.arrange(a,b,c, ncol=1)
+# a <- ggplot(markers4) +
+#     geom_boxplot(aes(x=site.platform, y=mm.yr_since_prev, col=site.platform)) +
+#     theme_bw() +
+#     theme(legend.position="none") +
+#     coord_cartesian(ylim=c(-50, 50)) +
+#     ggtitle("accretion rates since previous reading")
+# 
+# b <- ggplot(markers4) +
+#     geom_boxplot(aes(x=site.platform, y=mm.yr_since_feldapp, col=site.platform)) +
+#     theme_bw() +
+#     theme(legend.position="none") +
+#     coord_cartesian(ylim=c(-10, 25)) +
+#     ggtitle("accretion rates since time 0")
+# 
+# c <- ggplot(markers4) +
+#     geom_boxplot(aes(x=site.platform, y=mm_since_prev, col=site.platform)) +
+#     theme_bw() +
+#     theme(legend.position="none") +
+#     coord_cartesian(ylim=c(-10, 25)) +
+#     ggtitle("accretion over 3 months")
+# 
+# library(gridExtra)
+# grid.arrange(a,b,c, ncol=1)
 ```
 
 ## Here's an idea.
@@ -547,6 +548,10 @@ ggplot(markers4, aes(x=days_since_feldapp, y = avg_ht)) +
 ```
 
 
+### This graph is referenced below  
+
+in discussing the different methods of rate calculation 
+
 ```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=10}
 ggplot(markers4, aes(x=yrs_since_feldapp, y = avg_ht)) +
     geom_point(aes(col=factor(ref_date)), size=3, alpha=0.7) +
@@ -564,7 +569,7 @@ ggplot(markers4, aes(x=yrs_since_feldapp, y = avg_ht)) +
 ***
 ***
 
-## Possibly the best way
+## Another option - 3 rates per site.platform  
 
 Could do it by individual plat and average those together for each site.platform. I think this is a little different than how we've handled pin data, but I also think it might be appropriate, because the measurement unit is the individual plat. So we generate a rate for each plat within a site.platform, and average those three rates to get the site.platform rate. Then within a site, we average the three site.platform rates (which are also the 3 reps that we feed into an ANOVA).
 
@@ -677,7 +682,7 @@ kable(test_slr)
 ***
 
 
-### Okay, accretion rates.
+### Okay, accretion rates.  
 
 There are several methods I'd like to compare. But I'm going to start with what I think is the best way, which is using linear regression on sediment height as a function of # days since feldspar application. A slope will be calculated for each plat. Once this is done, the three plats for a site.platform will be averaged. Then the three slopes for site.platforms will be used to run ANOVA and Tukey by site, like we did with elevation change.
 
@@ -758,7 +763,7 @@ And Tukey:
 
 ```{r}
 # from library(agricolae)
-HSD.test(fit, 'site', console=TRUE)
+# HSD.test(fit, 'site', console=TRUE)
 hsd <- HSD.test(fit, 'site')
 hsdgroups <- hsd$groups
 names(hsdgroups) <- c('site', 'mean_mm.yr', 'group')
@@ -768,7 +773,8 @@ kable(hsdgroups)
 
 Will those averages come out differently per site.platform than just throwing all the points into one regression for site.platform?
 
-Here's one regression per site.platform:
+## Here's one regression per site.platform:  
+__which I think is more resistant to outliers__ - when nothing is weird, this should come the same as the average of 3 plats within a site.platform. But when there are outliers, they have less weight this way. So as of 9/5/2017, I'm thinking this is the best way to go.
 
 ```{r}
 accrmodels <- markers4 %>%
@@ -823,7 +829,7 @@ And Tukey:
 
 ```{r}
 # from library(agricolae)
-HSD.test(fit, 'site', console=TRUE)
+# HSD.test(fit, 'site', console=TRUE)
 hsd <- HSD.test(fit, 'site')
 hsdgroups <- hsd$groups
 names(hsdgroups) <- c('site', 'mean_mm.yr', 'group')
@@ -849,6 +855,8 @@ rates_all <- full_join(elev, accr)
 kable(rates_all)
 ```
 
+## This table is important!!
+
 ### And a summary by site
 
 ```{r}
@@ -864,3 +872,84 @@ rates_bysite <- rates_all %>%
 kable(rates_bysite)
 ```
 
+
+### Now. How does that compare to slopes from a regression on cumulative change?  
+
+Remember that I have a LOT of discomfort using cumulative change, for the following reasons:  
+
+*  Unless feldspar was re-laid really soon after a reading (within a few days, probably), the "reference reading" is not necessarily reliable. There could have been erosion - or accretion! - after the last reading that produced numbers - __especially if feldspar had not been found for multiple sampling dates before re-laying.__  
+*  Once we've named a "reference reading" to add to all subsequent readings, there's never a way to mathematically dip down below that. Even if feldspar isn't found, and there's been a lot of erosion, we have no way to detect that. So we're likely biasing our cumulative accretion, and therefore our rates, upwards.  
+
+
+__I'm really only running these because we all liked the graph with both elevation change and accretion, and to make that, I want to throw in cumulative accretion. But I don't want to do that if the slope it will show is wildly different from what's calculated the other way.__  
+
+First I need to make sure the data I'm thinking of is actually in the most recent data frame.
+
+```{r}
+kable(head(markers4, 15))
+```
+
+Yup. `avg_cumu` should be it.
+
+```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=10}
+ggplot(markers4) +
+    geom_point(aes(x=date, y=avg_cumu, col=site.platform)) +
+    geom_smooth(aes(x=date, y=avg_cumu, col=site.platform), method="lm", se=FALSE) +
+    facet_wrap(~site.platform, ncol=3) +
+    theme_bw()
+```
+
+
+Oh, how interesting. From a visual comparison of the graphs - this one compared to the `sediment height over feldspar vs. years since feldspar application` wrapped the same way as this plot, above - the rates look pretty similar. Possibly even less steep when calculated this way.
+
+### So let's pull out the numbers.
+
+```{r}
+accrmodels <- markers4 %>%
+    group_by(site.platform) %>%  
+    do(mod = lm(avg_cumu ~ date, data=.))
+
+accrcoefbysitep <- tidy(accrmodels, mod, conf.int=TRUE, conf.level=0.95) # this gives the intercept, slope, and p values, among others; conf.int=TRUE, conf.level=0.95 gives the 95% confidence interval
+
+# make a slope per year for date estimate; NAs for intercept
+accrcoefbysitep$mm.yr <- ifelse(accrcoefbysitep$term == "date", round(accrcoefbysitep$estimate * 365.25, 3), "NA")
+
+# confidence intervals in mm/yr:
+accrcoefbysitep$conf.low.yr <- ifelse(accrcoefbysitep$term == "date", round(accrcoefbysitep$conf.low * 365.25, 3), "NA")
+accrcoefbysitep$conf.high.yr <- ifelse(accrcoefbysitep$term == "date", round(accrcoefbysitep$conf.high * 365.25, 3), "NA")
+
+accrsummarybysitep <- glance(accrmodels, mod) # this gives r^2 and adjusted r^2, and p values, among others
+
+# kable(accrcoefbysitep)
+# kable(accrsummarybysitep)
+
+# pull into own table
+
+slopes.accrp <- accrcoefbysitep %>%
+    filter(term == 'date') %>%
+    mutate(site = substr(site.platform, 1, 4), 
+           mm.day = estimate) %>%
+    select(site.platform, site, mm.day, std.error, mm.yr, p.value) 
+slopes.accrp$mm.yr <- as.numeric(slopes.accrp$mm.yr)
+
+# need to split upper and lower juncus
+upper <- c("JURO-4", "JURO-5", "JURO-6")
+lower <- c("JURO-1", "JURO-2", "JURO-3")
+slopes.accrp$site[slopes.accrp$site.platform %in% upper] <- "UPJU"
+slopes.accrp$site[slopes.accrp$site.platform %in% lower] <- "LOJU"
+
+kable(slopes.accrp)
+
+```
+
+Pull up the rates again. Compare `mm.yr` in table above to `accr.mm.yr` below.
+
+```{r}
+kable(rates_all)
+```
+
+Wow, those are pretty different. Guess we can't re-make that cool graph; it would be misleading. Interesting though that what I thought would bias the rates to be higher actually turned out lower rates than the other method.
+
+***
+***
+***
