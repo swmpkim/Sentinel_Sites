@@ -27,6 +27,8 @@ Note: `markers_with_references.csv` is the file with all correct dates and 0s fo
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
 library(tidyverse)
 library(lubridate)
 library(broom)
@@ -289,3 +291,97 @@ toprint <- lapply(sets_split, set_gginteract)
 htmltools::tagList(toprint)
 ```
 
+***
+***
+***
+
+## Pull out only dates where SETs and MHs were both measured
+
+I went back to the step where I joined the data frames (line 170 as I'm writing this) to only join dates that are in BOTH data frames.   
+
+To do this: I used `dplyr::left_join` with `sets` as the left data frame and `markers` as the right. This pulled in MH data that matched SET measurement dates and excluded any MH data from other dates. On dates when SETs were measured but MHs were not, NAs were placed in the columns where matching MH data would have been. I eventually filtered out those rows, where SETs had been measured and MHs had not, by removing rows that had NAs in MH columns.  
+
+NAs can be meaningful, and I did not want to remove rows that had legitimate NAs because of MHs not being found on a measurement date. So before I joined the data frames together, I turned "NA" values into "-9999". Then when I removed rows with NAs in certain columns, the __real__ NAs remained. After joining and filtering, I turned -9999s back into NAs.
+
+
+```{r}
+
+### transform the NAs:
+markers2 <- markers 
+markers2$plat1[is.na(markers2$plat1) == "TRUE"] <- -9999
+markers2$plat2[is.na(markers2$plat2) == "TRUE"] <- -9999
+markers2$plat3[is.na(markers2$plat3) == "TRUE"] <- -9999
+    
+# join and filter out the NAs in plat1 (because this will also get rid of NAs in plats 2 and 3):
+dat_almost2 <- left_join(pin_change, markers2, by=c("site.platform", 'date')) %>%
+    filter(!is.na(plat1))
+
+# pull in feldspar relay dates
+dat_samedates <- left_join(dat_almost2, feldspar_relays, by=c("site.platform", "date" = "ref_date"))
+
+# turn -9999s back into NAs
+dat_samedates$plat1[dat_samedates$plat1 == -9999] <- NA
+dat_samedates$plat2[dat_samedates$plat2 == -9999] <- NA
+dat_samedates$plat3[dat_samedates$plat3 == -9999] <- NA
+```
+
+### Make the interactive graphs  
+
+Because these were based on SET data, that is present in every row, and the lines for pin readings are fully connected. __However__, that doesn't mean every SET reading is included here - particularly in 2013, there are long stretches without a point. Those are dates when SETs and MHs were done on different days.
+
+
+Missing triangles on a date are true NAs - where MHs were meant to be measured on a date when SETs were also measured, but feldspar was not found.
+
+
+Doing both things on the same date seems to have become the habit starting at the end of 2013.
+
+
+Note - there is one possible QC problem I found from these graphs; I believe, based on these graphs and the pdf named `pin_heights_by_site`, that the measurements for SPAL-1 and SPAL-3 were switched on 8-5-2014. I've sent the information to our SET team and will update data as necessary.
+
+```{r, message=FALSE, warning=FALSE}
+
+
+# make columns of date and measurement for the tooltip
+# first, remake dat_small; not as a time-series object
+dat_small <- dat_samedates %>%
+    mutate(pins = change, markers1 = plat1, markers2 = plat2, markers3 = plat3) %>%
+    select(site.platform, date, pins, markers1, markers2, markers3, relay1, relay2, relay3)
+
+dat_small <- dat_small %>%
+    mutate(pin_caption = paste0(date, ": ", round(pins,2), " mm"),
+           mh1_caption = paste0(date, ": ", round(markers1, 2), " mm"),
+           mh2_caption = paste0(date, ": ", round(markers2, 2), " mm"),
+           mh3_caption = paste0(date, ": ", round(markers3, 2), " mm"))
+
+# split the data
+sets_split <- split(dat_small, dat_small$site.platform)
+
+
+set_gginteract <- function(dat_split){
+g <- ggplot(dat_split, aes(x=date)) +
+    geom_point_interactive(aes(y=pins, tooltip=pin_caption, col="SET pins"), alpha = 0.3, size = 4, shape = 16) +
+    geom_point_interactive(aes(y=markers1, tooltip=mh1_caption, col="Marker Horizons 1"), size = 3, shape = 2) +
+    geom_point_interactive(aes(y=markers2, tooltip=mh2_caption, col="Marker Horizons 2"), size = 3, shape = 2) +
+    geom_point_interactive(aes(y=markers3, tooltip=mh3_caption, col="Marker Horizons 3"), size = 3, shape = 2) +
+    geom_point(aes(y=relay1, col="Marker Horizons 1"), size = 3, shape = 17, alpha = 0.8) +
+    geom_point(aes(y=relay2, col="Marker Horizons 2"), size = 3, shape = 17, alpha = 0.8) +
+    geom_point(aes(y=relay3, col="Marker Horizons 3"), size = 3, shape = 17, alpha = 0.8) +
+    geom_line(aes(y=pins, col="SET pins")) +
+    geom_line(aes(y=markers1, col="Marker Horizons 1"), alpha = 0.5) +
+    geom_line(aes(y=markers2, col="Marker Horizons 2"), alpha = 0.5) +
+    geom_line(aes(y=markers3, col="Marker Horizons 3"), alpha = 0.5) +
+    theme_bw() +
+    labs(title = as.character(unique(dat_split$site.platform)), x ="Date", y = "mm") +
+    scale_color_manual(values = c("SET pins" = "blue", "Marker Horizons 1" = "red", "Marker Horizons 2" = "orange", "Marker Horizons 3" = "darkslategray"))
+
+ggiraph(code = print(g + theme(legend.position='bottom')), width_svg = 10, tooltip_opacity = 0.8, zoom_max = 10)
+}
+
+# aaaaand lapply
+# which needs to be wrapped in htmltools, per Yihui
+# https://stackoverflow.com/questions/30509866/for-loop-over-dygraph-does-not-work-in-r
+toprint <- lapply(sets_split, set_gginteract)
+
+# don't really need the contortions for spacing that we had above, so just print it out
+htmltools::tagList(toprint)
+```
