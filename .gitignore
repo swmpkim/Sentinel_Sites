@@ -16,3 +16,5 @@ R output/*
 sets.group.R
 SET_processing.R
 SET_summarizing.R
+.Rproj.user
+*.docx
