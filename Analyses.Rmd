@@ -1,0 +1,443 @@
+---
+title: "SET Analyses"
+date: "`r Sys.Date()`"
+output: 
+    html_document:
+        keep_md: false
+        code_folding: 'hide'
+        toc: yes
+---
+
+## Setup; data wrangling 
+
+```{r setup_analyses, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+```
+
+
+### Loading libraries and datasets
+
+```{r importAndFormat_analyses}
+# open up important libraries
+library(tidyverse)
+library(lubridate)
+library(knitr)
+library(broom)
+library(agricolae)
+library(gridExtra)
+# library(multcompView)
+
+# load the datasets
+load("SET_data_files.R")
+
+```
+
+
+The code above loaded a series of data frames created from the `Rates.Rmd` file. Contents are the following:  
+
++  Raw data:
+    +  `markers_long`  
+    +  `sets_long`  
++  Calculated rates:
+    +  `allRates` - pin and MH rates, averaged by SET   
+    +  `rates_pins` - raw pin rates; 36 per SET    
+    +  `rates_MHs` - raw MH rates; 3 per SET  
+    
+    
+### Adding site names to the datasets
+
+Sites are as follows:  
+
+-  __CLMA = Cladium:__
+    - CLMAJ-1 
+    - CLMAJ-2 
+    - CLMAJ-3
+-  __PANN = Panne:__
+    - PANNE-1
+    - PANNE-2
+    - PANNE-3
+-  __JULO = Lower Juncus:__
+    - JURO-1
+    - JURO-2
+    - JURO-3
+-  __JUUP = Upper Juncus:__
+    - JURO-4
+    - JURO-5
+    - JURO-6
+-  __SPAL = Spartina:__
+    - SPAL-1
+    - SPAL-2
+    - SPAL-3
+    
+    
+<a href="#top">Back to top</a>
+
+
+
+The code below generates a data frame of site IDs and associated SETs.
+        
+```{r siteAssociation_analyses}
+
+# make a data frame of the sites
+
+# first make vectors for each site
+CLMA <- c("CLMAJ-1", "CLMAJ-2", "CLMAJ-3")
+PANN <- c("PANNE-1", "PANNE-2", "PANNE-3")
+JULO <- c("JURO-1", "JURO-2", "JURO-3")
+JUUP <- c("JURO-4", "JURO-5", "JURO-6")
+SPAL <- c("SPAL-1", "SPAL-2", "SPAL-3")
+
+# bind the vectors into a data frame
+siteID <- bind_cols("CLMA" = CLMA, "PANN" = PANN, "JULO" = JULO, "JUUP" = JUUP, "SPAL" = SPAL) %>%
+    gather(key = "site", value = "SET")
+
+# remove the vectors
+rm(CLMA, PANN, JULO, JUUP, SPAL)
+```
+
+
+The next code uses the data frame generated above to add a 'site' column to each of the loaded data frames.
+
+```{r updateDataFrames_analyses}
+# add a column into the rates data frame, matching site to SET
+# by merging the data frames
+allRates <- merge(allRates, siteID, by="SET", all.x=TRUE)
+markers_long <- merge(markers_long, siteID, by="SET", all.x=TRUE)
+sets_long <- merge(sets_long, siteID, by="SET", all.x=TRUE)
+rates_pins <- merge(rates_pins, siteID, by="SET", all.x=TRUE)
+rates_MHs <- merge(rates_MHs, siteID, by="SET", all.x=TRUE)
+```
+
+
+Here, we check the heads (and one tail) of the data frames, to make sure site got added in correctly. 
+
+```{r checkHeads_analyses}
+# check the heads of the data frames
+kable(head(allRates, 3), caption="head of allRates (calculated data)", align='c')
+kable(tail(allRates, 3), caption="tail of allRates (calculated data)", align='c')
+kable(head(markers_long, 3), caption="head of markers_long (QCd raw data)", align='c')
+kable(head(sets_long, 3), caption="head of sets_long (QCd raw data)", align='c')
+kable(head(rates_pins, 3), caption="head of rates_pins (calculated data)", align='c')
+kable(head(rates_MHs, 3), caption="head of rates_MHs (calculated data)", align='c')
+```
+
+<a href="#top">Back to top</a>
+
+
+## Analyses
+
+
+### Elevation Change Rate comparisons, between sites
+
+
+_Is the rate of elevation change (as measured through pin heights) different between sites?_  
+
+
+__H0__: All sites have the same rate of change of pin measurements (CLMArate = PANNrate = JUUPrate = JULOrate = SPALrate)  
+__Ha__: At least one site has a different rate of change    
+
+
+In a one-way ANOVA, n=3 replicates (SETs) per site. In a nested ANOVA, we still have overall n=3 replicates per site, with 36 subsamples per SET (pins are nested within SET; pins are not independent of each other). We could potentially add another nesting layer, arm position - pins within arm positions within replicates. It's possible that pins in one arm position are more closely related than pins in another arm position. But I'm not sure this would actually add any value, unless there's a specific research question.   
+
+
+Per Gotelli and Ellison (2004) in _A Primer of Ecological Statistics_, page 303: "The result of the nested ANOVA test for treatment differences would be algebraically identical to a simple one-way ANOVA in which you first calculated the average of the subsamples within a replicate." Presumably the nested ANOVA gives us a better idea of variation within and between replicates, but it will not change the overall result as we test between sites.  
+
+
+Set up a post-hoc Tukey test too in case H0 is rejected.  
+
+
+At this point, for simplicity, I will simply run a one-way ANOVA with post-hoc Tukey HSD on each SET's average rate.  
+
+
+#### Results
+
+__ANOVA output - Elevation change rates__
+
+
+```{r ANOVApins}
+fit <- aov(pin_change_mean ~ site, data = allRates)
+# summary(fit)
+anova(fit)
+```
+
+
+Yes, significant differences between groups.
+
+
+__Tukey output - Elevation change rates__
+
+```{r Tukeypins}
+# from library(agricolae)
+hsd <- HSD.test(fit, 'site') # storing it
+hsdgroups <- hsd$groups 
+
+
+# try alpha 0.1 (default, above, is 0.05) - see what happens if we're willing to allow a bit more error
+# commented out because nothing changed from the 0.05 alpha
+# hsd2 <- HSD.test(fit, 'site', alpha=0.1)
+```
+
+
+```{r TukeyResults, fig.width=8, fig.height=6}
+
+kable(hsdgroups, caption = "Tukey's HSD on elevation change rates", digits=2, align='c')
+
+
+# plot 0.05 alpha groupings
+plot(hsd, 
+     main = "Elevation change rate groupings \nTukey HSD alpha = 0.05",
+     xlab = "Site",
+     ylab = "long-term change (mm/yr)")
+box()
+
+
+# show this another way too:
+hsd2 <- TukeyHSD(fit)
+par(mar=c(5,6,5,2))
+plot(hsd2, las=1, col="brown", cex.axis=0.9)
+
+### plot 0.1 alpha groupings
+# commented out because nothing changed from the 0.05 alpha
+# plot(hsd, 
+#      main = "Elevation change rate groupings \nTukey HSD alpha = 0.10",
+#      xlab = "Site",
+#      ylab = "long-term change (mm/yr)")
+
+```
+
+
+And, ordered by elevation gradient.
+
+```{r orderedTukey1}
+### THIS SHOULD WORK WITH EITHER PINS OR MHs
+# whichever has been used in the model
+
+# make data frames with all relevant data
+# hsd$means shows min, max, and quartiles
+# hsd$groups gives the group letters
+hsdresults <- rownames_to_column(hsd$means, 'site')
+names(hsdresults)[2] <- 'sitemean'
+
+hsdresults2 <- rownames_to_column(hsd$groups, 'site')
+names(hsdresults2)[2] <- 'sitemean'
+
+# merge the data frames
+hsdresults3 <- merge(hsdresults, hsdresults2, by=c('site', 'sitemean'))
+hsdresults4 <- mutate(hsdresults3, site=factor(site, levels=c("CLMA", "PANN", "JUUP", "JULO", "SPAL"), ordered=TRUE))
+
+
+# plot the tukey results; factor order puts highest elevation first; 
+# decreasing elevation from left to right
+hsdplot <- ggplot(hsdresults4) +
+    geom_point(aes(x=site, y=sitemean, col=groups), show.legend=FALSE, size=3) +
+    geom_linerange(aes(x=site, ymin=Min, ymax=Max, col=groups), size=1, show.legend=FALSE) +
+    ggtitle("Tukey groupings - elevation change rates", subtitle = "point is mean change; lines extend to min and max by site") +
+    labs(x="Site", y="rate of change (mm/yr)") +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+
+# annotate the groupings inside the plot
+# this puts groups at the top without coordinate-flipping
+hsdplot + geom_text(aes(x=site, y=max(hsdresults4$Max), label=groups), nudge_y=0.3)
+              
+              
+# flip the coordinates; scale_x_discrete command makes sure the elevations come out correctly - 
+# highest at top, lowest at bottom
+# get the group annotations to the left, by the site labels
+pinhsdplot <- hsdplot + scale_x_discrete(limits=rev(levels(hsdresults4$site))) +
+    geom_text(aes(x=site, y=min(hsdresults4$Min), label=groups), nudge_y=-0.2) +
+    coord_flip()
+
+print(pinhsdplot)
+
+```
+
+
+<a href="#top">Back to top</a>  
+
+
+
+
+### Accretion Rate comparisons, between sites  
+
+_Is the rate of accretion (as measured through marker horizon cores) different between sites?_  
+
+
+__H0__: All sites have the same rate of accretion (CLMArate = PANNrate = JUUPrate = JULOrate = SPALrate)  
+__Ha__: At least one site has a different rate of change    
+
+
+We could again run either a one-way ANOVA or a nested ANOVA. In a one-way ANOVA, n=3 replicates (MHplots) per site. In a nested ANOVA, we still have overall n=3 replicates per site, with 3 subsamples per SET (MHplots are nested within SET; MHplots are not independent of each other).  
+
+
+Set up a post-hoc Tukey test in case H0 is rejected. 
+
+
+At this point, for simplicity, I will simply run a one-way ANOVA with post-hoc Tukey HSD on each SET's average rate.  
+
+
+
+#### Results
+
+__ANOVA output - Accretion Rates__
+
+```{r ANOVAmarkerResults}
+fit <- aov(MH_change_mean ~ site, data = allRates)
+anova(fit)
+```
+
+Yes, significant differences between groups.
+
+
+__Tukey output - Accretion Rates__
+
+
+```{r Tukeymarkers}
+# from library(agricolae)
+hsd <- HSD.test(fit, 'site')
+hsdgroups <- hsd$groups 
+
+
+# try alpha 0.1 (default, above, is 0.05) - see what happens if we're willing to allow a bit more error
+# commented out because nothing changed from the 0.05 alpha
+# hsd010 <- HSD.test(fit, 'site', alpha=0.1)
+```
+
+```{r TukeymarkerResults, fig.width=8, fig.height=6}
+
+kable(hsdgroups, caption = "Tukey's HSD on accretion rates", digits=2, align='c')
+
+# plot 0.05 alpha groupings
+plot(hsd, 
+     main = "Accretion rate groupings \nTukey HSD alpha = 0.05",
+     xlab = "Site",
+     ylab = "long-term change (mm/yr)")
+box()
+
+
+# show this another way too:
+hsd2 <- TukeyHSD(fit)
+par(mar=c(5,6,5,2))
+plot(hsd2, las=1, col="brown", cex.axis=0.9)
+
+
+### plot 0.1 alpha groupings
+# commented out because nothing changed from the 0.05 alpha
+# plot(hsd010,
+#      main = "Accretion rate groupings \nTukey HSD alpha = 0.10",
+#      xlab = "Site",
+#      ylab = "long-term change (mm/yr)")
+
+``` 
+
+
+And, ordered by elevation gradient.
+
+```{r orderedTukey2}
+### THIS SHOULD WORK WITH EITHER PINS OR MHs
+# whichever has been used in the model
+
+# make data frames with all relevant data
+# hsd$means shows min, max, and quartiles
+# hsd$groups gives the group letters
+hsdresults <- rownames_to_column(hsd$means, 'site')
+names(hsdresults)[2] <- 'sitemean'
+
+hsdresults2 <- rownames_to_column(hsd$groups, 'site')
+names(hsdresults2)[2] <- 'sitemean'
+
+# merge the data frames
+hsdresults3 <- merge(hsdresults, hsdresults2, by=c('site', 'sitemean'))
+hsdresults4 <- mutate(hsdresults3, site=factor(site, levels=c("CLMA", "PANN", "JUUP", "JULO", "SPAL"), ordered=TRUE))
+
+
+# plot the tukey results; factor order puts highest elevation first; 
+# decreasing elevation from left to right
+hsdplot <- ggplot(hsdresults4) +
+    geom_point(aes(x=site, y=sitemean, col=groups), show.legend=FALSE, size=3) +
+    geom_linerange(aes(x=site, ymin=Min, ymax=Max, col=groups), size=1, show.legend=FALSE) +
+    ggtitle("Tukey groupings - accretion rates", subtitle = "point is mean change; lines extend to min and max by site") +
+    labs(x="Site", y="rate of change (mm/yr)") +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+
+# annotate the groupings inside the plot
+# this puts groups at the top without coordinate-flipping
+hsdplot + geom_text(aes(x=site, y=max(hsdresults4$Max), label=groups), nudge_y=0.3)
+              
+              
+# flip the coordinates; scale_x_discrete command makes sure the elevations come out correctly - 
+# highest at top, lowest at bottom
+# get the group annotations to the left, by the site labels
+MHhsdplot <- hsdplot + scale_x_discrete(limits=rev(levels(hsdresults4$site))) +
+    geom_text(aes(x=site, y=min(hsdresults4$Min), label=groups), nudge_y=-0.2) +
+    coord_flip()
+
+print(MHhsdplot)
+
+```
+
+
+##### __Pin and accretion HSD plots by elevation next to each other__
+
+```{r orderedTukey3, fig.width=10, fig.height=5}
+
+grid.arrange(pinhsdplot, MHhsdplot, ncol=2)
+
+```
+
+
+<a href="#top">Back to top</a>  
+
+
+### Sea Level Rise comparisons  
+
+
+How do we want to set this up? Is a site's elevation changing more quickly than SLR? In which case, the replicates are again the 3 SETs per site.  
+
+
+How to set up hypotheses: presume that sites are keeping up with sea level, unless the evidence persuades us otherwise? (H0: rate >= SLR; Ha: rate < SLR)  Or presume the worst, that they're not keeping up, unless evidence convinces us that they are?  (H0: rate <= SLR; Ha: rate > SLR)  
+
+
+One of these tests for each site. Would be just a t-test for each site; do we need to adjust for multiple comparisons, since we're testing 6 sites?  
+
+
+Could we incorporate the rate of SLR into the ANOVAs above? Example:  
+H0: CLMArate = PANNrate = etc = 3.5  
+Ha: One of these things does not equal the others  
+My worry here is that it's then 2-sided, and having the rate exactly equal to or unequal to SLR doesn't mean as much as >= vs. < or <= vs. >.  
+
+
+__I don't know how to perform Bayesian analyses, but I feel like those could be more appropriate for this question than the traditional H0/Ha frequentist stats.__  
+
+If we go with frequentist analyses, my current thought is that > and = belong together. If the rate of elevation change in a marsh is greater than or equal to the rate of SLR, it's chugging along okay. So the null hypothesis should be >=, and Ha should be <.  
+
+
+__Here are some t-tests comparing each site's rate of elevation change to our local rate of SLR (3.5 mm/yr).__  
+
+__H0:__ rate >= 3.5  
+__Ha:__ rate < 3.5  
+
+
+```{r}
+models <- allRates %>%
+    group_by(site) %>%  
+    do(mod = t.test(.$pin_change_mean, mu=3.5, alternative="less"))
+
+modelcoef <- tidy(models, mod, conf.int=FALSE) %>%
+    select(site, estimate, statistic, p.value, method, alternative)
+
+kable(modelcoef, digits = c(4,2,3,4,4,4), align='c')
+```
+
+
+__Only the PANN site's elevation change is significantly lower than the rate of SLR.__  
+
+Keep in mind, with only 3 replicates per site, we don't have a whole lot of statistical power here.  
+
+
+<a href="#top">Back to top</a>  

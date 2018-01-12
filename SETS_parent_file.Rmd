@@ -1,0 +1,75 @@
+---
+title: "Parent File for running SET analyses"
+date: "`r Sys.Date()`"
+output: 
+    html_document:
+        keep_md: false
+        code_folding: 'hide'
+        toc: yes
+---
+
+# Background  
+
+## This document  
+
+Code is hidden but can be expanded  
+
+Glimpses of tables are included so the reader can keep track of how data is formatted throughout the process
+
+
+
+## The Sentinel Site Project  
+
+Something here about overall project goals
+
+
+### Sampling Design
+
+Long-term monitoring, etc. 5 sites along a coastal transition transect, each with 3 Surface Elevation Tables (SETs). 36 pins per SET, measured quarterly from 2012-2016, then 2x/yr. 3 Marker Horizon plots per SET, measured quarterly from 2012-2016, then 2x/yr.
+
+
+### Data processing  
+
+Master spreadsheet --> long or wide formats  
+
+Read in through _xxxx_ script, then processed.  
+
+Note corrections that have been made to original data.
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1: Rate calculations
+SET pins for elevation change  
+
+Marker Horizons for accretion
+
+```{r child = "Rates.Rmd"}
+```
+
+***
+***
+***
+***
+
+# 2: Statistical Analyses
+Inter-site comparisons
+
+```{r child = "Analyses.Rmd"}
+```
+
+***
+***
+***
+***
+
+# Housekeeping  
+Package info, etc.
+
+```{r}
+sessionInfo()
+```
+

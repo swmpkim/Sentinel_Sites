@@ -1,0 +1,455 @@
+---
+title: "SET/MH Rate Generation"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+  html_document:
+    code_folding: hide
+    keep_md: no
+    toc: yes
+date: "`r Sys.Date()`"
+---
+
+
+## Setup; data import and formatting  
+
+Reading in most updated csv files; they are in wide format and this code gathers them into long format.  
+
+```{r setup_rates, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+```
+
+```{r importAndFormat_rates}
+# open up important libraries
+library(tidyverse)
+library(lubridate)
+library(knitr)
+library(broom)
+
+
+### pins
+# read in; wide format
+sets_wide <- read.csv("sets_wide_UPDATED.csv") %>%
+    mutate(date = mdy(date)) 
+# gather, so it's one row per pin. group by SET, date, arm.
+sets_long <- sets_wide %>%
+    gather(key="pin", value="value", -SET, -date, -arm) %>%
+    group_by(SET, date, arm)
+# create a summary dataset from sets_long, which is already grouped by SET-date-arm
+sets_summByArm <- sets_long %>%
+    summarize(meanPinHt = mean(value, na.rm=TRUE),
+              sdPinHt = sd(value, na.rm=TRUE),
+              sePinHt = sdPinHt/(sqrt(length(value))))
+
+
+### markers    
+# read in; wide format
+markers_wide <- read.csv("markers_UPDATED.csv") %>%
+    mutate(date = mdy(date), ref_date = mdy(ref_date))
+# gather; one row per reading
+markers_long <- markers_wide %>%
+    gather(key="reading", value="value", -SET, -MHplot, -date, -ref_date) %>%
+    group_by(SET, MHplot, date) %>%
+    arrange(SET, MHplot, date, reading)
+
+```
+
+****
+
+## A peek at all the data tables that we're working with
+
+***
+
+
+### SETs
+
+```{r pindfHeads}
+
+kable(head(sets_wide, 3), caption = "Pin readings - wide format", align='c')
+kable(head(sets_long, 3), caption = "Pin readings - long format", align='c')
+# kable(head(sets_summByArm, 3), caption = "Pin readings - summary by arm position")
+
+```
+
+<a href="#top">Back to top</a> 
+
+***
+***
+
+### Marker Horizons
+
+```{r markerdfHeads}
+
+kable(head(markers_wide, 3), caption = "MH readings - wide format", align='c')
+kable(head(markers_long, 3), caption = "MH readings - long format", align='c')
+
+```
+
+
+<a href="#top">Back to top</a> 
+
+
+****
+****
+
+
+## Rates galore
+
+
+
+### SET readings
+
+##### by individual pin
+
+```{r setRatesByPin}
+
+models <- sets_long %>%
+    group_by(SET, arm, pin) %>%  
+    do(mod = lm(value ~ date, data=.))
+
+modelcoef <- tidy(models, mod, conf.int=TRUE, conf.level=0.95) # this gives the intercept, slope, and p values, among others; conf.int=TRUE, conf.level=0.95 gives the 95% confidence interval
+
+# get rid of intercept row,
+# calculate mm/yr for all the terms,
+# round mm/yr to 3 digits,
+# get rid of the mm/day stuff
+rates_pins <- modelcoef %>%
+    filter(term == "date") %>%
+    mutate(rate_mm.yr = round(estimate*365.25, 3),
+           se_mm.yr = round(std.error*365.25, 3),
+           CIlow_mm.yr = round(conf.low*365.25, 3),
+           CIhigh_mm.yr = round(conf.high*365.25, 3),
+           p.value = round(p.value, 4),
+           statistic = round(statistic, 3)) %>%
+    select(SET, arm, pin, rate_mm.yr, se_mm.yr, CIlow_mm.yr, CIhigh_mm.yr, statistic, p.value)
+
+
+modelsummary <- glance(models, mod) # this gives r^2 and adjusted r^2, and p values, among others
+
+kable(head(rates_pins), align='c')
+kable(head(modelsummary), digits=3, align='c')
+
+# write.csv(rates_pins, "pin_rates.csv", row.names = FALSE)
+# write.csv(modelsummary, "pin_regressions.csv", row.names = FALSE)
+
+```
+
+<a href="#top">Back to top</a> 
+
+
+#### histograms of pin rate data distribution
+
+```{r SEThistograms, fig.width=6, fig.height=15}
+
+# calculate a data frame of mean per SET
+# to generate vertical lines on the histograms
+mean_pinrate <- rates_pins %>%
+    group_by(SET) %>%
+    summarize(mean_pins = mean(rate_mm.yr, na.rm=TRUE))
+
+ggplot(rates_pins) +
+    geom_histogram(aes(rate_mm.yr), color='darkslategray', fill='cadetblue3') +
+    geom_vline(aes(xintercept=mean_pins), mean_pinrate, color="red3", lwd=1) +
+    facet_grid(SET ~.) +
+    theme_bw() +
+    ggtitle("Histograms of elevation change rates by SET", subtitle="red line represents mean rate for SET")
+
+
+```
+
+
+<a href="#top">Back to top</a> 
+
+
+
+##### summarized by arm position
+
+_Note: Because I combine tables at the end, I'm not showing individual tables of rates here. I have checked them to verify the combined table is correct. If anyone wants to see the intermediate tables, the "# kable" line can be uncommented and run._ 
+
+```{r setRatesByArm}
+
+rates_pins_summByArm <- rates_pins %>%
+    ungroup() %>%
+    group_by(SET, arm) %>%
+    summarize(pin_change_mean = round(mean(rate_mm.yr, na.rm=TRUE), 2),
+              pin_change_sd = round(sd(rate_mm.yr, na.rm=TRUE), 3),
+              pin_change_se = round(pin_change_sd/sqrt(length(rate_mm.yr)), 3))
+
+rates_mean_perarm <- rates_pins_summByArm %>%
+    select(SET, arm, pin_change_mean) %>%
+    spread(key = arm, value = pin_change_mean)
+
+# kable(rates_mean_perarm, caption="Mean rate of change (mm/yr) per arm position")
+```
+
+
+<a href="#top">Back to top</a> 
+
+
+#### summarized by SET
+
+
+First by averaging all 36 pins' rates together
+
+
+```{r setRatesBySET}
+# average of 36 pins
+
+rates_pins_summBySET <- rates_pins %>%
+    ungroup() %>%
+    group_by(SET) %>%
+    summarize(pin_change_mean = round(mean(rate_mm.yr, na.rm=TRUE), 2),
+              pin_change_sd = round(sd(rate_mm.yr, na.rm=TRUE), 3),
+              pin_change_se = round(pin_change_sd/sqrt(length(rate_mm.yr)), 3))
+
+
+# kable(rates_pins_summBySET, caption="Summary statistics of rate of change (mm/yr) per SET, when averaging all pins together")
+
+# write.csv(rates_pins_summBySET, "pin_rates_bySET.csv", row.names=FALSE)
+
+```
+
+
+Also calculated by averaging the rates of the 4 arms. As expected, mean was the same as above; sd and se were different. Table is not shown here but can be generated.
+
+```{r setRatesByArm-SET}
+# average of 4 arms
+
+rates_SET_avgByArm <- rates_pins_summByArm %>%
+    ungroup() %>%
+    group_by(SET) %>%
+    summarize(pin_change_avg = round(mean(pin_change_mean, na.rm=TRUE), 2),
+              pin_change_sd = round(sd(pin_change_mean, na.rm=TRUE), 3),
+              pin_change_se = round(pin_change_sd/sqrt(length(pin_change_mean)), 3))
+
+# kable(rates_SET_avgByArm, caption = "Summary statistics of rate of change (mm/yr) per SET, when averaging arms together")
+
+```
+
+
+<a href="#top">Back to top</a> 
+
+****
+
+### Marker Horizons
+
+```{r MHratesByCore}
+
+# need a column for number of days between feldspar application and reading date
+markers_long <- mutate(markers_long, daysSinceLaying = as.numeric(date - ref_date))
+
+models <- markers_long %>%
+    group_by(SET, MHplot) %>%  
+    do(mod = lm(value ~ daysSinceLaying, data=.))
+
+modelcoef <- tidy(models, mod, conf.int=TRUE, conf.level=0.95) # this gives the intercept, slope, and p values, among others; conf.int=TRUE, conf.level=0.95 gives the 95% confidence interval
+
+# get rid of intercept row,
+# calculate mm/yr for all the terms,
+# round mm/yr to 3 digits,
+# get rid of the mm/day stuff
+rates_MHs <- modelcoef %>%
+    filter(term == "daysSinceLaying") %>%
+    mutate(rate_mm.yr = round(estimate*365.25, 3),
+           se_mm.yr = round(std.error*365.25, 3),
+           CIlow_mm.yr = round(conf.low*365.25, 3),
+           CIhigh_mm.yr = round(conf.high*365.25, 3),
+           p.value = round(p.value, 4),
+           statistic = round(statistic, 3)) %>%
+    select(SET, MHplot, rate_mm.yr, se_mm.yr, CIlow_mm.yr, CIhigh_mm.yr, statistic, p.value)
+
+
+modelsummary <- glance(models, mod) # this gives r^2 and adjusted r^2, and p values, among others
+
+kable(head(rates_MHs), align='c')
+kable(head(modelsummary), digits=3, align='c')
+
+# write.csv(rates_MHs, "MH_rates.csv", row.names = FALSE)
+# write.csv(modelsummary, "pin_regressions.csv", row.names = FALSE)
+
+```
+
+<a href="#top">Back to top</a> 
+
+
+#### histograms of accretion rate data distribution
+
+
+```{r MHhistograms, fig.width=6, fig.height=15}
+
+# calculate a data frame of mean per SET
+# to generate vertical lines on the histograms
+mean_mhrate <- rates_MHs %>%
+    group_by(SET) %>%
+    summarize(mean_mh = mean(rate_mm.yr, na.rm=TRUE))
+
+
+ggplot(rates_MHs) +
+    geom_histogram(aes(rate_mm.yr), color='darkslategray', fill='tomato3') +
+    geom_vline(aes(xintercept=mean_mh), mean_mhrate, color="navyblue", lwd=1) +
+    facet_grid(SET ~.) +
+    theme_bw() +
+    ggtitle("Histograms of Marker Horizon change rates by SET", subtitle="blue line represents mean rate for SET")
+
+```
+
+
+<a href="#top">Back to top</a> 
+
+
+#### summarized by SET
+
+_Again, not showing this table, because this information is in the final table._
+
+```{r MHRatesBySET}
+# average of 36 pins
+
+rates_MHs_summBySET <- rates_MHs %>%
+    ungroup() %>%
+    group_by(SET) %>%
+    summarize(MH_change_mean = round(mean(rate_mm.yr, na.rm=TRUE), 2),
+              MH_change_sd = round(sd(rate_mm.yr, na.rm=TRUE), 3),
+              MH_change_se = round(MH_change_sd/sqrt(length(rate_mm.yr)), 3))
+
+
+# kable(rates_MHs_summBySET, caption="Summary statistics of rate of accretion (mm/yr) per SET, when averaging all 3 MHplots together")
+
+# write.csv(rates_MHs_summBySET, "MH_rates_bySET.csv", row.names=FALSE)
+
+```
+
+
+****
+
+## Combined pin and MH data
+
+### Table of rates
+
+```{r rateCombine}
+
+allRates <- full_join(rates_pins_summBySET, rates_MHs_summBySET)
+
+kable(allRates, align='c')
+
+# write.csv(allRates, "rates_allBySET.csv", row.names=FALSE)
+
+```
+
+
+<a href="#top">Back to top</a> 
+
+
+### bar graph of pin and MH rates by site
+
+```{r rateGraph, fig.width=7, fig.height=5}
+
+# need to make the data frame long
+
+# allRates_long <- allRates %>%
+#     gather(key = "param", value = "value", -SET) %>%
+#     mutate(type = strsplit(param, "_"))
+
+ggplot(allRates) +
+    geom_col(aes(x=SET, y=pin_change_mean, fill="pins"), col="darkslategray", alpha=0.5) +
+    geom_col(aes(x=SET, y=MH_change_mean, fill="MH"), col="darkslategray", alpha=0.6) +
+    geom_errorbar(aes(x=SET, ymin=pin_change_mean - 2*pin_change_se, ymax=pin_change_mean + 2*pin_change_se), col="navyblue") +
+    geom_errorbar(aes(x=SET, ymin=MH_change_mean - 2*MH_change_se, ymax=MH_change_mean + 2*MH_change_se), col="red3") +
+    theme_bw() +
+    theme(axis.text.x=element_text(angle=45,hjust=1)) +
+  ggtitle("Rates of change by SET \n+/- 2 standard errors \n(approximately a 95% confidence interval)") +
+  ylab("long-term change (mm)")
+    
+    
+
+```
+
+
+<a href="#top">Back to top</a> 
+
+
+
+### faceted plot of pin changes  
+
+
+Averaged per SET. First converted to "change since time 0" for each pin, then all changes averaged per SET per date.
+
+```{r pinChangePlot, fig.width=7, fig.height=10}
+
+# convert to change since time 0 for each pin
+sets_long <- sets_long %>%
+    group_by(SET, arm, pin) %>%
+    arrange(SET, arm, pin, date) %>%
+    mutate(totalchange = value - value[1])
+
+# the 2 lines below load code for the 'stat_smooth_func', which annotates facets of a ggplot with the regression equation and r^2s. I opted to comment this out because the slope is in mm/day, which is hard to understand.
+# library(devtools)
+# source_gist("524eade46135f6348140", filename="ggplot_smooth_func.R")
+
+ggplot(sets_long, aes(x=date, y=totalchange)) +
+    geom_point(aes(col=arm), alpha=0.4) +
+    geom_smooth(method="lm") +
+    # stat_smooth_func(geom="text",method="lm",hjust=0,parse=TRUE) +
+    facet_wrap(~SET, ncol=3) +
+    ggtitle("Changes in each pin since first measurement", subtitle = "colored by arm position, with one overall linear regression per SET") +
+    labs(y="change since first reading (mm)", x="Measurement Date") +
+    theme_bw()
+
+```
+
+
+<a href="#top">Back to top</a> 
+
+
+### faceted plot of MH changes  
+
+
+Averaged per SET
+
+```{r MHchangePlot, fig.width=8, fig.height=15}
+
+markers_long <- markers_long %>%
+    mutate(yearsSinceLaying = daysSinceLaying/365.25)
+
+
+ggplot(markers_long) +
+    geom_point(aes(x=yearsSinceLaying, y=value, col=as.factor(ref_date)), size=2, alpha=0.5) +
+    geom_smooth(aes(x=yearsSinceLaying, y=value), method="lm") +
+    facet_grid(SET~MHplot) +
+    ggtitle("Accretion rates by plot") +
+    labs(x="Years since feldspar application", y="total change (mm)") +
+    theme_bw()
+
+```
+
+
+<a href="#top">Back to top</a> 
+
+
+***
+***
+
+## Export the data frames, to be used in a later analysis script
+
+This will create an R object named `SET_data_files.R`. Contents are the following data frames:  
+
++  Raw data:
+    +  `markers_long`  
+    +  `sets_long`  
++  Calculated rates:
+    +  `allRates` - pin and MH rates, averaged by SET   
+    +  `rates_pins` - raw pin rates; 36 per SET    
+    +  `rates_MHs` - raw MH rates; 3 per SET  
+    
+    
+_Note: This is commented out so it won't run every time; it can be run whenever there is a change that makes it necessary._
+    
+```{r dataExport}
+# last updated 12/28 after adding columns above (years since feldspar application in markers_long and change since time 0 in sets_long)
+
+# save(markers_long, sets_long, allRates, rates_pins, rates_MHs, file="SET_data_files.R")
+
+```
+
