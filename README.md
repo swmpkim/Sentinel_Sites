@@ -4,7 +4,9 @@
 ### Guide to scripts
 
 + `QC_plots.R`: a first attempt at some general graphs that might help with quality checks.  
-+ `Analyses.R`: an attempt at a single script to generate rates of change for SET/MH data.
++ `Rates.Rmd`: Calculations of change rates for SETs and Marker Horizons.  
++ `Analyses.Rmd`: ANOVAs and Tukey Tests to compare change rates between sites. t-tests to compare elevation change rates within sites to local rate of sea level rise.  
++ `SETS_parent_file.Rmd`: File that runs both `Rates` and `Analyses` scripts and provides all documentation, folded code, and outputs into one html file.  
 
 
 
