@@ -1,7 +1,10 @@
 ---
 title: "SET/MH QC plots with interactivity"
 output:
-  html_document: default
+  html_document: 
+        keep_md: false
+        code_folding: 'hide'
+        toc: yes
   pdf_document: default
 date: "`r Sys.Date()`"
 ---

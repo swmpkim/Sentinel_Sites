@@ -1,0 +1,491 @@
+---
+title: "SET Analyses - subsetted for SETs and MHs"
+date: "`r Sys.Date()`"
+output: 
+    html_document:
+        keep_md: false
+        code_folding: 'hide'
+        toc: yes
+        toc_depth: 4
+---
+
+## Setup; data wrangling 
+
+```{r setup_analyses, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+```
+
+
+### Loading libraries and datasets
+
+```{r importAndFormat_analyses}
+# open up important libraries
+library(tidyverse)
+library(lubridate)
+library(knitr)
+library(broom)
+library(agricolae)
+library(gridExtra)
+library(plotly)
+# library(multcompView)
+
+# load the datasets
+load("SET_data_files.R")
+
+```
+
+
+The code above loaded a series of data frames created from the `Rates.Rmd` file. Contents are the following:  
+
++  Raw data:
+    +  `markers_long`  
+    +  `sets_long`  
++  Calculated rates:
+    +  `allRates` - pin and MH rates, averaged by SET   
+    +  `rates_pins` - raw pin rates; 36 per SET    
+    +  `rates_MHs` - raw MH rates; 3 per SET  
+
+    
+### Adding site names to the datasets
+
+Sites are as follows:  
+
+-  __CLMA = Cladium:__
+    - CLMAJ-1 
+    - CLMAJ-2 
+    - CLMAJ-3
+-  __PANN = Panne:__
+    - PANNE-1
+    - PANNE-2
+    - PANNE-3
+-  __JULO = Lower Juncus:__
+    - JURO-1
+    - JURO-2
+    - JURO-3
+-  __JUUP = Upper Juncus:__
+    - JURO-4
+    - JURO-5
+    - JURO-6
+-  __SPAL = Spartina:__
+    - SPAL-1
+    - SPAL-2
+    - SPAL-3
+    
+    
+<a href="#top">Back to top</a>
+
+
+
+The code below generates a data frame of site IDs and associated SETs.
+        
+```{r siteAssociation_analyses}
+
+# make a data frame of the sites
+
+# first make vectors for each site
+CLMA <- c("CLMAJ-1", "CLMAJ-2", "CLMAJ-3")
+PANN <- c("PANNE-1", "PANNE-2", "PANNE-3")
+JULO <- c("JURO-1", "JURO-2", "JURO-3")
+JUUP <- c("JURO-4", "JURO-5", "JURO-6")
+SPAL <- c("SPAL-1", "SPAL-2", "SPAL-3")
+
+# bind the vectors into a data frame
+siteID <- bind_cols("CLMA" = CLMA, "PANN" = PANN, "JULO" = JULO, "JUUP" = JUUP, "SPAL" = SPAL) %>%
+    gather(key = "site", value = "SET")
+
+# remove the vectors
+rm(CLMA, PANN, JULO, JUUP, SPAL)
+```
+
+
+The next code uses the data frame generated above to add a 'site' column to each of the loaded data frames.
+
+```{r updateDataFrames_analyses}
+# add a column into the rates data frame, matching site to SET
+# by merging the data frames
+allRates <- merge(allRates, siteID, by="SET", all.x=TRUE)
+markers_long <- merge(markers_long, siteID, by="SET", all.x=TRUE)
+sets_long <- merge(sets_long, siteID, by="SET", all.x=TRUE)
+rates_pins <- merge(rates_pins, siteID, by="SET", all.x=TRUE)
+rates_MHs <- merge(rates_MHs, siteID, by="SET", all.x=TRUE)
+```
+
+
+Here, we check the heads (and one tail) of the data frames, to make sure site got added in correctly. 
+
+```{r checkHeads_analyses}
+# check the heads of the data frames
+# kable(head(allRates, 3), caption="head of allRates (calculated data)", align='c')
+# kable(tail(allRates, 3), caption="tail of allRates (calculated data)", align='c')
+# kable(head(markers_long, 3), caption="head of markers_long (QCd raw data)", align='c')
+# kable(head(sets_long, 3), caption="head of sets_long (QCd raw data)", align='c')
+# kable(head(rates_pins, 3), caption="head of rates_pins (calculated data)", align='c')
+# kable(head(rates_MHs, 3), caption="head of rates_MHs (calculated data)", align='c')
+```
+
+<a href="#top">Back to top</a>
+
+
+
+## Subsetting
+
+We only want to look at the last 3 years, when SETs and MHs were measured consistently on the same dates, and when feldspar didn't need to be re-laid. This should help us look at subsidence.
+
+
+Eventually, will calculate annualized rates of change for each. For now, I just want to get them subsetted and on the same graph.
+
+
+```{r}
+markers_long_recent <- markers_long %>%
+    filter(date >= "2014-01-01")
+sets_long_recent <- sets_long %>%
+    filter(date >= "2014-01-01") %>%
+    select(-totalchange)
+```
+
+
+## Change since 'time 0'
+
+
+Easier on SETs than markers
+
+```{r}
+sets_long_recent <- sets_long_recent %>%
+    group_by(site, SET, arm, pin) %>%
+    mutate(cumuChange = value - value[1])
+
+# get an average and SE for each SET/date
+sets_long_summ <- sets_long_recent %>%
+    ungroup() %>%
+    group_by(site, SET, date) %>%
+    summarize(meanChange = mean(cumuChange, na.rm=TRUE),
+              seChange = sd(cumuChange, na.rm=TRUE)/length(cumuChange),
+              nChange = length(cumuChange))
+
+```
+
+
+I'll just stick with sediment heights for now and not worry about time 0 for markers. I do need an average from a plot for a given day though.
+
+
+Averaged readings for a single MH plot by date; into an intermediate data frame.
+
+Then averaged readings of MH plots per SET per date, into the summary data frame that will be used for plotting.  
+
+This way, if different MHplots had different numbers of readings on a given date, they're not unevenly weighted. Each MHplot is even by averaging within plots first.
+
+```{r}
+markers_long_intermed <- markers_long_recent %>%
+    ungroup() %>%
+    group_by(site, SET, MHplot, date) %>%
+    summarize(meanSed = mean(value, na.rm=TRUE))
+
+markers_long_summ <- markers_long_intermed %>%
+    ungroup() %>%
+    group_by(site, SET, date) %>%
+    summarize(meanSed = mean(meanSed, na.rm=TRUE))
+```
+
+
+
+## Graph  
+
+### SETs alone first
+
+
+```{r, fig.width=8, fig.height=5}
+ggplot(sets_long_summ) +
+    geom_point(aes(x=date, y=meanChange, col=site), size=2, alpha=0.7) +
+    facet_wrap(~site) +
+    theme_bw() +
+    ggtitle("Cumulative Change", subtitle = "pin heights over time") +
+    xlab("Date") +
+    ylab("change (mm)")
+
+
+# 
+# ggplot() +
+#     geom_point(data=markers_long_summ, aes(x=date, y=meanSed), col="gray22") +
+#     geom_point(data=sets_long_summ, aes(x=date, y=meanChange, col=site), size=2, alpha=0.5) +
+#     facet_wrap(~site, ncol=1) +
+#     theme_bw() +
+#     ggtitle("Cumulative Change", subtitle = "pin heights over time") +
+#     xlab("Date") +
+#     ylab("change (mm)")
+```
+
+
+
+### MHs alone
+
+Aggregate by MHplot first.
+
+```{r, fig.width=5, fig.height=10}
+markers_cumm <- markers_long_intermed %>%
+    ungroup() %>%
+    group_by(site, SET, MHplot) %>%
+    mutate(cumuSed = meanSed - meanSed[1])
+
+markers_cumm_summ <- markers_cumm %>%
+    ungroup() %>%
+    group_by(site, SET, date) %>%
+    summarize(meanCumuSed = mean(cumuSed, na.rm=TRUE))
+```
+
+
+#### From Time 0
+
+```{r}
+ggplot(markers_cumm_summ) +
+    geom_point(aes(x=date, y=meanCumuSed), col="gray22", size=2, alpha=0.7) +
+    facet_wrap(~site) +
+    theme_bw() +
+    ggtitle("Cumulative Sediment Accretion", subtitle = "MHplots over time") +
+    xlab("Date") +
+    ylab("change (mm)")
+```
+
+
+#### NOT adjusted for first reading
+
+
+That looks a little weird to me because so many of the values are negative. But I looked through the data frame, and I think it's just because of the starting values for 2014. The latest recorded feldspar re-lay is 11/22/2013. 
+
+Here is a plot that averaged MHplots by SET but did *not* subtract the first reading.
+
+
+```{r, fig.width=8, fig.height=5}
+
+markers_long_bySET <- markers_long_intermed %>%
+    ungroup() %>%
+    group_by(site, SET, date) %>%
+    summarize(meanSedbySET = mean(meanSed, na.rm=TRUE))
+
+ggplot(markers_long_bySET) +
+    geom_point(aes(x=date, y=meanSedbySET, col=SET), size=2, alpha=0.8) +
+    facet_wrap(~site) +
+    theme_bw() +
+    ggtitle("Mean Sediment Height by SET", subtitle = "MHplots over time") +
+    xlab("Date") +
+    ylab("change (mm)")
+```
+
+
+Here it is without the plots averaged by SET; just plots:
+
+```{r, fig.width=8, fig.height=5}
+
+ggplot(markers_long_intermed) +
+    geom_point(aes(x=date, y=meanSed, col=SET, shape=as.factor(MHplot)), size=2, alpha=0.6) +
+    facet_wrap(~site) +
+    theme_bw() +
+    ggtitle("Mean Sediment Height by MHplot", subtitle = "MHplots over time") +
+    xlab("Date") +
+    ylab("change (mm)")
+
+
+```
+
+
+
+### SETs and MHs 
+
+#### Just the points
+
+Graph them. Facet by individual SET.
+
+```{r, fig.width=7, fig.height=10}
+ggplot() +
+    geom_point(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), col="gray22", size=1.5) +
+    geom_point(data=sets_long_summ, aes(x=date, y=meanChange, col=site), size=2.5, alpha=0.7) +
+    facet_wrap(~SET, ncol=3) +
+    theme_bw() +
+    ggtitle("Cumulative Change", subtitle = "color = pin change; gray = sediment ht") +
+    xlab("Date") +
+    ylab("change (mm)")
+```
+
+
+
+#### Points plus SLR
+
+Add in SLR:
+
+
+```{r, fig.width=7, fig.height=10}
+
+# define SLR slope and intercept:
+slr_slope <- 3.5/365.25
+# and intercept, because time 0 is at 1970-01-01 and we want line to go through 0
+slr_int <- 0 - slr_slope*as.integer(as.Date('2014-01-01'))
+
+
+#plot
+ggplot() +
+    geom_abline(slope = slr_slope, intercept = slr_int, lty=2, lwd=1, col="blue", alpha=0.8) +
+    geom_point(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), col="gray22", size=1.5) +
+    geom_point(data=sets_long_summ, aes(x=date, y=meanChange, col=site), size=2.5, alpha=0.9) +
+        facet_wrap(~SET, ncol=3) +
+    theme_bw() +
+    ggtitle("Cumulative Change", subtitle = "colored points = pin change; \ngray points = sediment ht; \ndashed line = SLR") +
+    xlab("Date") +
+    ylab("change (mm)")
+```
+
+
+I wonder if we can make this interactive with ggplotly: (yes, but dates don't show up in an understandable way, so it's commented out)
+
+```{r, fig.width=7, fig.height=10}
+# a <- ggplot() +
+#     geom_point(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), col="gray22", size=1.5) +
+#     geom_point(data=sets_long_summ, aes(x=date, y=meanChange, col=site), size=2.5, alpha=0.7) +
+#     facet_wrap(~SET, ncol=3) +
+#     theme_bw() +
+#     ggtitle("Cumulative Change", subtitle = "color = pin change; gray = sediment ht") +
+#     xlab("Date") +
+#     ylab("change (mm)")
+# 
+# ggplotly(a)
+```
+
+
+#### Points, regressions, and SLR by SET
+
+Add in regressions for each SET. Removed SLR because there's a lot of other stuff here to digest.
+
+```{r, fig.width=7, fig.height=10}
+#plot
+ggplot() +
+    geom_point(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), col="gray22", size=1.5) +
+    geom_smooth(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), method = "lm", se=F, col = "gray22") +
+    geom_point(data=sets_long_summ, aes(x=date, y=meanChange, col=site), size=2.5, alpha=0.9) +
+    geom_smooth(data=sets_long_summ, aes(x=date, y=meanChange, col=site), method = "lm", se=F) +
+    facet_wrap(~SET, ncol=3) +
+    theme_bw() +
+    ggtitle("Cumulative Change", subtitle = "colored points = pin change; \ngray points = sediment ht; \ndashed line = SLR") +
+    xlab("Date") +
+    ylab("change (mm)")
+```
+
+
+#### Points, regressions, and SLR by site
+
+Points are representative of each SET, so there are 3 per date per site, but the regression is drawn for the site overall. This is interesting, because pin and MH rates look pretty similar to each other at Cladium, Panne, and Spartina - almost exactly the same at those first two, though I haven't spit out numbers - whereas both Juncus sites show them kind of diverging.
+
+```{r, fig.width=9, fig.height=6}
+#plot
+ggplot() +
+    geom_abline(slope = slr_slope, intercept = slr_int, lty=2, lwd=0.8, col="blue", alpha=1) +
+    geom_point(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), col="gray22", alpha=0.7, size=1.5) +
+    geom_smooth(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), method = "lm", se=F, col = "gray22", lwd=1.5, alpha=1) +
+    geom_point(data=sets_long_summ, aes(x=date, y=meanChange, col=site), size=1.5, alpha=0.7) +
+    geom_smooth(data=sets_long_summ, aes(x=date, y=meanChange, col=site), method = "lm", se=F, lwd=1.5, alpha=1) +
+    facet_wrap(~site) +
+    theme_bw() +
+    ggtitle("Cumulative Change", subtitle = "colored points = pin change; \ngray points = sediment ht; \ndashed line = SLR") +
+    xlab("Date") +
+    ylab("change (mm)")
+```
+
+
+#### Just points and regressions by site  
+
+
+Just like above, but without the SLR line, to simplify.
+
+```{r, fig.width=9, fig.height=6}
+#plot
+ggplot() +
+    geom_point(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), col="gray22", alpha=0.7, size=1.5) +
+    geom_smooth(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), method = "lm", se=F, col = "gray22", lwd=1.5, alpha=1) +
+    geom_point(data=sets_long_summ, aes(x=date, y=meanChange, col=site), size=1.5, alpha=0.7) +
+    geom_smooth(data=sets_long_summ, aes(x=date, y=meanChange, col=site), method = "lm", se=F, lwd=1.5, alpha=1) +
+    facet_wrap(~site) +
+    theme_bw() +
+    ggtitle("Cumulative Change", subtitle = "colored points = pin change; \ngray points = sediment ht; \ndashed line = SLR") +
+    xlab("Date") +
+    ylab("change (mm)")
+```
+
+
+### Pulling out the numbers from the site-wide regressions  
+
+Basically, pulling out the rates used in the ggplot: taking the averaged values per SET - change from time 0 - and using the 3 SETs per site as replicate values per date in a linear regression.  
+
+```{r}
+models <- sets_long_summ %>%
+    group_by(site) %>%  
+    do(mod = lm(meanChange ~ date, data=.))
+
+modelcoef <- tidy(models, mod, conf.int=TRUE, conf.level=0.95) # this gives the intercept, slope, and p values, among others; conf.int=TRUE, conf.level=0.95 gives the 95% confidence interval
+
+# get rid of intercept row,
+# calculate mm/yr for all the terms,
+# round mm/yr to 3 digits,
+# get rid of the mm/day stuff
+rates_pins <- modelcoef %>%
+    filter(term == "date") %>%
+    mutate(pin_rate_mm.yr = round(estimate*365.25, 3),
+           pin_se_mm.yr = round(std.error*365.25, 3),
+           pin_CIlow_mm.yr = round(conf.low*365.25, 3),
+           pin_CIhigh_mm.yr = round(conf.high*365.25, 3),
+           pin_p.value = round(p.value, 4),
+           pin_statistic = round(statistic, 3)) %>%
+    select(site, pin_rate_mm.yr, pin_se_mm.yr, pin_CIlow_mm.yr, pin_CIhigh_mm.yr, pin_statistic, pin_p.value)
+
+
+# modelsummary <- glance(models, mod) # this gives r^2 and adjusted r^2, and p values, among others
+# 
+# kable(head(rates_pins), align='c')
+# kable(head(modelsummary), digits=3, align='c')
+```
+
+
+```{r}
+models <- markers_cumm_summ %>%
+    group_by(site) %>%  
+    do(mod = lm(meanCumuSed ~ date, data=.))
+
+modelcoef <- tidy(models, mod, conf.int=TRUE, conf.level=0.95) # this gives the intercept, slope, and p values, among others; conf.int=TRUE, conf.level=0.95 gives the 95% confidence interval
+
+# get rid of intercept row,
+# calculate mm/yr for all the terms,
+# round mm/yr to 3 digits,
+# get rid of the mm/day stuff
+rates_markers <- modelcoef %>%
+    filter(term == "date") %>%
+    mutate(mh_rate_mm.yr = round(estimate*365.25, 3),
+           mh_se_mm.yr = round(std.error*365.25, 3),
+           mh_CIlow_mm.yr = round(conf.low*365.25, 3),
+           mh_CIhigh_mm.yr = round(conf.high*365.25, 3),
+           mh_p.value = round(p.value, 4),
+           mh_statistic = round(statistic, 3)) %>%
+    select(site, mh_rate_mm.yr, mh_se_mm.yr, mh_CIlow_mm.yr, mh_CIhigh_mm.yr, mh_statistic, mh_p.value)
+
+# modelsummary <- glance(models, mod) # this gives r^2 and adjusted r^2, and p values, among others
+# 
+# kable(head(rates_markers), align='c')
+# kable(head(modelsummary), digits=3, align='c')
+```
+
+```{r}
+rates_all <- full_join(rates_pins, rates_markers) %>%
+    select(site, pin_rate_mm.yr, mh_rate_mm.yr, pin_se_mm.yr, mh_se_mm.yr, pin_p.value, mh_p.value)
+kable(rates_all, digits=3, align = 'c')
+```
+
+__For Comparison__  
+
+Pin rates seem pretty similar to what was calculated before. MH rates are pretty different.  
+
+Rates calculated on the full data set (averaged differently than the ones in this file) were:
+
+Site  |  Pin rate  |  MH rate
+---------- | ---------- | ----------
+CLMA  |  4.28  |  2.78
+PANN  |  0.54  |  3.87
+JUUP  |  2.46  |  0.83
+JULO  |  5.45  |  1.91
+SPAL  |  4.99  |  3.38
