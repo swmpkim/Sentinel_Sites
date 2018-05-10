@@ -6,8 +6,18 @@ output:
         keep_md: false
         code_folding: 'hide'
         toc: yes
+        toc_float: true
         toc_depth: 4
 ---
+
+## Two changes to this document: 
+
+Prior version of this document's output is Analyses-subsetted_2018-02-28.html  
+
+Updates:  
+
+1.  Floating table of contents  
+2.  Marker Horizons are NO LONGER set to 0 at the beginning of this 3-year time period. Rates should come out the same, but there will no longer be points below 0 on the x-axis for MHs in any of the graphs.
 
 ## This file also includes a Kendall's tau test for trend to see how different the rates are  
 
@@ -226,18 +236,15 @@ ggplot(sets_long_summ) +
 
 ### MHs alone
 
-Aggregate by MHplot first.
+Aggregate by MHplot first.  
+
+__In the original version of this script, all MHplot readings subtracted the first reading in the series to start from 0. That has been removed here. The danger is if feldspar was applied on different dates in different plots within a SET (this has happened) - the averages will NOT show an overall average of accumulation when the three plots are averaged together.__
 
 ```{r, fig.width=5, fig.height=10}
-markers_cumm <- markers_long_intermed %>%
-    ungroup() %>%
-    group_by(site, SET, MHplot) %>%
-    mutate(cumuSed = meanSed - meanSed[1])
 
-markers_cumm_summ <- markers_cumm %>%
-    ungroup() %>%
-    group_by(site, SET, date) %>%
-    summarize(meanCumuSed = mean(cumuSed, na.rm=TRUE))
+## removing the "set to time 0" at the beginning means I'm using a data frame from above, rather than modifying one. I'm simply assigning it to the new name to avoid changing code downstream.
+
+markers_cumm_summ <- markers_long_summ
 ```
 
 
@@ -245,7 +252,7 @@ markers_cumm_summ <- markers_cumm %>%
 
 ```{r}
 ggplot(markers_cumm_summ) +
-    geom_point(aes(x=date, y=meanCumuSed), col="gray22", size=2, alpha=0.7) +
+    geom_point(aes(x=date, y=meanSed), col="gray22", size=2, alpha=0.7) +
     facet_wrap(~site) +
     theme_bw() +
     ggtitle("Cumulative Sediment Accretion", subtitle = "MHplots over time") +
@@ -304,7 +311,7 @@ Graph them. Facet by individual SET.
 
 ```{r, fig.width=7, fig.height=10}
 ggplot() +
-    geom_point(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), col="gray22", size=1.5) +
+    geom_point(data=markers_cumm_summ, aes(x=date, y=meanSed), col="gray22", size=1.5) +
     geom_point(data=sets_long_summ, aes(x=date, y=meanChange, col=site), size=2.5, alpha=0.7) +
     facet_wrap(~SET, ncol=3) +
     theme_bw() +
@@ -331,7 +338,7 @@ slr_int <- 0 - slr_slope*as.integer(as.Date('2014-01-01'))
 #plot
 ggplot() +
     geom_abline(slope = slr_slope, intercept = slr_int, lty=2, lwd=1, col="blue", alpha=0.8) +
-    geom_point(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), col="gray22", size=1.5) +
+    geom_point(data=markers_cumm_summ, aes(x=date, y=meanSed), col="gray22", size=1.5) +
     geom_point(data=sets_long_summ, aes(x=date, y=meanChange, col=site), size=2.5, alpha=0.9) +
         facet_wrap(~SET, ncol=3) +
     theme_bw() +
@@ -345,7 +352,7 @@ I wonder if we can make this interactive with ggplotly: (yes, but dates don't sh
 
 ```{r, fig.width=7, fig.height=10}
 # a <- ggplot() +
-#     geom_point(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), col="gray22", size=1.5) +
+#     geom_point(data=markers_cumm_summ, aes(x=date, y=meanSed), col="gray22", size=1.5) +
 #     geom_point(data=sets_long_summ, aes(x=date, y=meanChange, col=site), size=2.5, alpha=0.7) +
 #     facet_wrap(~SET, ncol=3) +
 #     theme_bw() +
@@ -364,8 +371,8 @@ Add in regressions for each SET. Removed SLR because there's a lot of other stuf
 ```{r, fig.width=7, fig.height=10}
 #plot
 ggplot() +
-    geom_point(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), col="gray22", size=1.5) +
-    geom_smooth(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), method = "lm", se=F, col = "gray22") +
+    geom_point(data=markers_cumm_summ, aes(x=date, y=meanSed), col="gray22", size=1.5) +
+    geom_smooth(data=markers_cumm_summ, aes(x=date, y=meanSed), method = "lm", se=F, col = "gray22") +
     geom_point(data=sets_long_summ, aes(x=date, y=meanChange, col=site), size=2.5, alpha=0.9) +
     geom_smooth(data=sets_long_summ, aes(x=date, y=meanChange, col=site), method = "lm", se=F) +
     facet_wrap(~SET, ncol=3) +
@@ -384,8 +391,8 @@ Points are representative of each SET, so there are 3 per date per site, but the
 #plot
 ggplot() +
     geom_abline(slope = slr_slope, intercept = slr_int, lty=2, lwd=0.8, col="blue", alpha=1) +
-    geom_point(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), col="gray22", alpha=0.7, size=1.5) +
-    geom_smooth(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), method = "lm", se=F, col = "gray22", lwd=1.5, alpha=1) +
+    geom_point(data=markers_cumm_summ, aes(x=date, y=meanSed), col="gray22", alpha=0.7, size=1.5) +
+    geom_smooth(data=markers_cumm_summ, aes(x=date, y=meanSed), method = "lm", se=F, col = "gray22", lwd=1.5, alpha=1) +
     geom_point(data=sets_long_summ, aes(x=date, y=meanChange, col=site), size=1.5, alpha=0.7) +
     geom_smooth(data=sets_long_summ, aes(x=date, y=meanChange, col=site), method = "lm", se=F, lwd=1.5, alpha=1) +
     facet_wrap(~site) +
@@ -404,8 +411,8 @@ Just like above, but without the SLR line, to simplify.
 ```{r, fig.width=9, fig.height=6}
 #plot
 ggplot() +
-    geom_point(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), col="gray22", alpha=0.7, size=1.5) +
-    geom_smooth(data=markers_cumm_summ, aes(x=date, y=meanCumuSed), method = "lm", se=F, col = "gray22", lwd=1.5, alpha=1) +
+    geom_point(data=markers_cumm_summ, aes(x=date, y=meanSed), col="gray22", alpha=0.7, size=1.5) +
+    geom_smooth(data=markers_cumm_summ, aes(x=date, y=meanSed), method = "lm", se=F, col = "gray22", lwd=1.5, alpha=1) +
     geom_point(data=sets_long_summ, aes(x=date, y=meanChange, col=site), size=1.5, alpha=0.7) +
     geom_smooth(data=sets_long_summ, aes(x=date, y=meanChange, col=site), method = "lm", se=F, lwd=1.5, alpha=1) +
     facet_wrap(~site) +
@@ -452,7 +459,7 @@ rates_pins <- modelcoef %>%
 ```{r}
 models <- markers_cumm_summ %>%
     group_by(site) %>%  
-    do(mod = lm(meanCumuSed ~ date, data=.))
+    do(mod = lm(meanSed ~ date, data=.))
 
 modelcoef <- tidy(models, mod, conf.int=TRUE, conf.level=0.95) # this gives the intercept, slope, and p values, among others; conf.int=TRUE, conf.level=0.95 gives the 95% confidence interval
 
@@ -510,7 +517,7 @@ Next, Marker horizons
 ```{r}
 models <- markers_cumm_summ %>%
     group_by(site) %>%  
-    do(mod = kendallTrendTest(meanCumuSed ~ date, data=.))
+    do(mod = kendallTrendTest(meanSed ~ date, data=.))
 
 modelcoef <- tidy(models, mod)
 names(modelcoef) <- c("site", "tau", "slope", "intercept", "statistic", "mh_p.value", "method", "alternative")
