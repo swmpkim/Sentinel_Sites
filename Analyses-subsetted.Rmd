@@ -9,6 +9,11 @@ output:
         toc_depth: 4
 ---
 
+## This file also includes a Kendall's tau test for trend to see how different the rates are  
+
+Especially because marker horizon data look non-linear.
+
+
 ## Setup; data wrangling 
 
 ```{r setup_analyses, include=FALSE}
@@ -29,6 +34,7 @@ library(broom)
 library(agricolae)
 library(gridExtra)
 library(plotly)
+library(EnvStats)
 # library(multcompView)
 
 # load the datasets
@@ -472,13 +478,63 @@ rates_markers <- modelcoef %>%
 
 ```{r}
 rates_all <- full_join(rates_pins, rates_markers) %>%
-    select(site, pin_rate_mm.yr, mh_rate_mm.yr, pin_se_mm.yr, mh_se_mm.yr, pin_p.value, mh_p.value)
+    select(site, pin_rate_mm.yr, pin_se_mm.yr, pin_p.value, mh_rate_mm.yr, mh_se_mm.yr, mh_p.value)
 kable(rates_all, digits=3, align = 'c')
 ```
 
+
+
+### Kendall tau test for trend and rates
+
+First, pins
+
+```{r}
+models <- sets_long_summ %>%
+    group_by(site) %>%  
+    do(mod = kendallTrendTest(meanChange ~ date, data=.))
+
+modelcoef <- tidy(models, mod)
+names(modelcoef) <- c("site", "tau", "slope", "intercept", "statistic", "pin_p.value", "method", "alternative")
+
+modelcoef <- mutate(modelcoef, 
+       pin_slope_mm.yr = slope * 365.25)
+
+kendallPinRates <- modelcoef %>%
+    select(site, pin_slope_mm.yr, pin_p.value)
+    
+```
+
+
+Next, Marker horizons
+
+```{r}
+models <- markers_cumm_summ %>%
+    group_by(site) %>%  
+    do(mod = kendallTrendTest(meanCumuSed ~ date, data=.))
+
+modelcoef <- tidy(models, mod)
+names(modelcoef) <- c("site", "tau", "slope", "intercept", "statistic", "mh_p.value", "method", "alternative")
+
+modelcoef <- mutate(modelcoef, 
+       mh_slope_mm.yr = slope * 365.25)
+
+kendallMHRates <- modelcoef %>%
+    select(site, mh_slope_mm.yr, mh_p.value)
+```
+
+
+Join, and spit out a table. These look pretty similar to the linear regression rates calculated just above.
+
+```{r}
+kendallrates_all <- full_join(kendallPinRates, kendallMHRates) %>%
+    select(site, pin_slope_mm.yr, pin_p.value, mh_slope_mm.yr, mh_p.value)
+kable(kendallrates_all, digits=3, align = 'c')
+```
+
+
 __For Comparison__  
 
-Pin rates seem pretty similar to what was calculated before. MH rates are pretty different.  
+Pin rates for these 3 years are quite similar to what was calculated before. MH rates are quite different.  
 
 Rates calculated on the full data set (averaged differently than the ones in this file) were:
 
@@ -489,3 +545,5 @@ PANN  |  0.54  |  3.87
 JUUP  |  2.46  |  0.83
 JULO  |  5.45  |  1.91
 SPAL  |  4.99  |  3.38
+
+
