@@ -1,0 +1,297 @@
+---
+title: "SET Analyses - NAVD88"
+date: "`r Sys.Date()`"
+output: 
+    html_document:
+        keep_md: false
+        code_folding: 'hide'
+        toc: yes
+        toc_float: true
+        toc_depth: 4
+---
+
+__Initial RMD setup__
+<br>
+
+```{r setup_analyses, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+```
+
+__Loading libraries and data sets__
+<br>
+```{r importAndFormat_analyses}
+# open up important libraries
+library(tidyverse)
+library(lubridate)
+library(knitr)
+library(broom)
+library(agricolae)
+library(gridExtra)
+library(plotly)
+library(EnvStats)
+# library(multcompView)
+
+# load the datasets
+load("SET_data_files.R")
+
+```
+
+
+# Add NAVD88 information into the SET data frame  
+
+There is a spreadsheet called 'NAVD88.csv' that has NAVD88 elevations of each SET table in it. These were derived from _[duration]_ RTK occupations on _[some date]_. (2011?)
+
+The data frame we want to work with here is `sets_long`. Here is the top of that data frame:
+<br>
+```{r}
+kable(head(sets_long))
+```
+
+<br>
+
+## Read in NAVD88 data  
+
+Here we read in and look at the head of the NAVD88 sheet:
+<br>
+```{r}
+navd88 <- read.csv("NAVD88.csv")
+kable(head(navd88))
+```
+
+<br>
+
+## Calculate NAVD88 offset for each SET, then NAVD88-adjusted surface elevations  
+
+<br>
+A correction factor can be calculated as: `SET_NAVD88 + Adapter_NAVD88 - 0.756`  
+
+0.756m is the length of the pins used to measure surface elevation.  
+
+Here I use the above formula to calculate an offset for each SET, and add it into the `navd88` data frame. I then add the calculated _offset_ value into the `sets_long` data frame, and subtract it from the pin value (which has been converted to meters), to calculate a navd88-adjusted surface elevation, named *elevation_navd88*.
+
+<br>
+```{r}
+navd88 <- navd88 %>%
+    mutate(offset = SET_NAVD88 + Adapter_NAVD88 - 0.756)
+kable(head(navd88))
+
+sets_long_navd88 <- left_join(sets_long, navd88, by = c("SET" = "Site")) %>%
+    select(-SET_NAVD88, -Adapter_NAVD88) %>%
+    mutate(value_m = value/1000,
+           elevation_navd88 = value_m + offset)
+kable(head(sets_long_navd88))
+```
+
+<br>
+
+### Quick plots to see what's going on  
+
+There has been no aggregation yet - this is all 36 pins per SET.  
+<br>
+
+```{r}
+ggplot(sets_long_navd88) +
+    geom_point(aes(x = date, y = elevation_navd88, color = SET)) +
+    theme_minimal() +
+    ggtitle("NAVD-88 adjusted pin heights")
+```
+
+<br>
+Facet by site to zoom in a bit.
+<br>
+```{r}
+ggplot(sets_long_navd88) +
+    geom_point(aes(x = date, y = elevation_navd88, color = SET)) +
+    facet_wrap(~SET, ncol = 3, scales = "free_y") +
+    theme_minimal() +
+    ggtitle("NAVD-88 adjusted pin heights")    
+```
+
+<br>
+<br>
+
+# Aggregate by SET  
+
+Here I'm averaging all 36 pins within a SET to get a single, NAVD-88 adjusted, mean elevation for the SET on each date.
+<br>
+
+```{r}
+sets_navd88_mean <- sets_long_navd88 %>%
+    group_by(SET, date) %>%
+    summarize(elevation_mean = mean(elevation_navd88, na.rm = TRUE))
+kable(head(sets_navd88_mean))
+```
+
+< br>
+Another plot to see how it looks now:
+<br>
+```{r}
+ggplot(sets_navd88_mean) +
+    geom_point(aes(x = date, y = elevation_mean, color = SET)) +
+    theme_minimal() +
+    ggtitle("NAVD88-adjusted mean surface elevation by SET")
+```
+
+<br>
+<br>
+
+## Add in column for site
+<br>
+
+
+# Sea Level Rise stuff
+
+<br>
+
+
+## Rate of SLR
+
+
+The rate of sea level rise (SLR) at the Dauphin Island Tide gauge through 2016 was 3.5 mm/yr. This gets updated every year and in 2017 was 3.61. More details can be found here: 
+https://tidesandcurrents.noaa.gov/sltrends/sltrends_station.shtml?stnid=8735180 
+
+
+Because R works in days, we need to convert 3.5 mm/yr into a rate per day. And because the NAVD88 stuff is in meters, we need this to become meters per day. The math for that is:
+
+3.5 * 365.25 / 1000
+
+The 365.25 accounts for leap years.
+
+<br>
+
+
+## Sea Level values  
+
+
+
+### Tidal Datums relative to MLLW  
+
+Tidal datums were obtained from https://tidesandcurrents.noaa.gov/datums.html?units=1&epoch=0&id=8740166&name=Grand+Bay+NERR%2C+Mississippi+Sound&state=MS on 5/11/2018. 
+
+
+Per page 7 of the benchmark sheets found here: https://tidesandcurrents.noaa.gov/benchmarks.html?id=8740166  , these datums were calculated based on readings at a tide station at the Bayou Heron Boat Ramp from March to August 2011.  
+
+Tidal datums in meters, relative to MLLW:  
+
++  MHHW 0.485  
++  MHW 0.456  
++  MSL 0.236  
++  MLW 0.039  
++  MLLW 0.000  
++  NAVD88 0.183
+
+
+### Tidal Datums relative to NAVD88  
+
+These are obtained by subtracting 0.183 from all the other values, and these will be used in the graphs.  
+
++  MHHW 0.302  
++  MHW 0.273  
++  MSL 0.053  
++  MLW -0.144  
++  MLLW -0.183  
++  NAVD88 0.000 
+
+
+Adding `geom_abline` to the graphs with x-axis as the year involved some calculations, per this stackoverflow answer: https://stackoverflow.com/questions/21946896/how-to-add-abline-in-ggplot2-with-x-axis-as-year
+
+```{r}
+
+# slope in m/day
+slr_slope <- 3.5/365.25/1000
+
+# and intercept, because time 0 is at 1970-01-01 and we want line to go through 0 on August 31, 2011, the end of the data period for datum calculation
+slr_int <- 0.053 - slr_slope*as.integer(as.Date("2011-08-31"))
+mhw_int <- 0.273 - slr_slope*as.integer(as.Date("2011-08-31"))
+mlw_int <- -0.144 - slr_slope*as.integer(as.Date("2011-08-31"))
+mhhw_int <- 0.302 - slr_slope*as.integer(as.Date("2011-08-31"))
+mllw_int <- -0.183 - slr_slope*as.integer(as.Date("2011-08-31"))
+```
+
+
+# Graphs that include sea levels
+
+## Lines but no shading
+
+
+```{r}
+ggplot(sets_navd88_mean, aes(x=date, y=elevation_mean)) +
+    geom_point(aes(col=SET), alpha=0.5, size=3) +
+    theme_minimal() +
+    geom_abline(aes(slope = slr_slope, intercept = slr_int), col="blue") +
+    geom_abline(aes(slope = slr_slope, intercept = mhw_int), col="blue") +
+    geom_abline(aes(slope = slr_slope, intercept = mlw_int), col="blue") +
+    geom_abline(aes(slope = slr_slope, intercept = mllw_int), col="blue", lty = 2) +
+    geom_abline(aes(slope = slr_slope, intercept = mhhw_int), col="blue", lty = 2) +
+    ggtitle("SETS through time relative to NAVD88") +
+    ylab("elevation (m)") +
+    ylim(-0.3,1.0)
+```
+
+
+__Facet because this is weird__
+
+<br>
+
+```{r}
+ggplot(sets_navd88_mean, aes(x=date, y=elevation_mean)) +
+    geom_point(aes(col=SET), alpha=0.5, size=3) +
+    theme_minimal() +
+    geom_abline(aes(slope = slr_slope, intercept = slr_int), col="blue") +
+    geom_abline(aes(slope = slr_slope, intercept = mhw_int), col="blue") +
+    geom_abline(aes(slope = slr_slope, intercept = mlw_int), col="blue") +
+    geom_abline(aes(slope = slr_slope, intercept = mllw_int), col="blue", lty = 2) +
+    geom_abline(aes(slope = slr_slope, intercept = mhhw_int), col="blue", lty = 2) +
+    facet_wrap(~SET, ncol = 3) +
+    ggtitle("SETS through time relative to NAVD88") +
+    ylab("elevation (m)") +
+    ylim(-0.3,1.0)
+
+# free y-scales
+ggplot(sets_navd88_mean, aes(x=date, y=elevation_mean)) +
+    geom_point(aes(col=SET), alpha=0.5, size=3) +
+    theme_minimal() +
+    geom_abline(aes(slope = slr_slope, intercept = slr_int), col="blue") +
+    geom_abline(aes(slope = slr_slope, intercept = mhw_int), col="blue") +
+    geom_abline(aes(slope = slr_slope, intercept = mlw_int), col="blue") +
+    geom_abline(aes(slope = slr_slope, intercept = mllw_int), col="blue", lty = 2) +
+    geom_abline(aes(slope = slr_slope, intercept = mhhw_int), col="blue", lty = 2) +
+    facet_wrap(~SET, ncol = 3, scales = "free_y") +
+    ggtitle("SETS through time relative to NAVD88") +
+    ylab("elevation (m)") 
+```
+
+
+__Sanity check: just horizonal lines; don't try to show SLR; just the tidal datums__
+
+
++  MHHW 0.302  
++  MHW 0.273  
++  MSL 0.053  
++  MLW -0.144  
++  MLLW -0.183  
++  NAVD88 0.000 
+
+```{r}
+ggplot(sets_navd88_mean, aes(x=date, y=elevation_mean)) +
+    geom_point(aes(col=SET), alpha=0.5, size=3) +
+    theme_minimal() +
+    geom_hline(yintercept = 0.273, col="blue") +
+    geom_hline(yintercept = 0.053, col="blue") +
+    geom_hline(yintercept = -0.144, col="blue") +
+    geom_hline(yintercept = 0.302, col="blue", lty = 2) +
+    geom_hline(yintercept = -0.183, col="blue", lty = 2) +
+    facet_wrap(~SET, ncol = 3) +
+    ggtitle("SETS through time relative to NAVD88") +
+    ylab("elevation (m)") +
+    ylim(-0.3,1.0)
+```
+
+
+STILL NEED TO:  
+
++  Add in 'site' column for aggregating  
++  make the shaded graph
+
