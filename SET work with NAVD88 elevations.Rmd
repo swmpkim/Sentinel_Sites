@@ -26,17 +26,22 @@ __Loading libraries and data sets__
 library(tidyverse)
 library(lubridate)
 library(knitr)
-library(broom)
-library(agricolae)
-library(gridExtra)
-library(plotly)
-library(EnvStats)
+# library(broom)
+# library(agricolae)
+# library(gridExtra)
+# library(plotly)
+# library(EnvStats)
+library(RColorBrewer)
 # library(multcompView)
 
 # load the datasets
 load("SET_data_files.R")
 
 ```
+
+__Note to self about figure sizes__: When fiddling with graphics in the console, execute `windows()` to open up a new graphics device; then run the code for the plot; resize with the mouse; then find the dimensions by typing `dev.size("in")`.
+
+<br>
 
 
 # Add NAVD88 information into the SET data frame  
@@ -91,7 +96,7 @@ kable(head(sets_long_navd88))
 There has been no aggregation yet - this is all 36 pins per SET.  
 <br>
 
-```{r}
+```{r, fig.width = 6.35, height = 8.35}
 ggplot(sets_long_navd88) +
     geom_point(aes(x = date, y = elevation_navd88, color = SET)) +
     theme_minimal() +
@@ -101,7 +106,7 @@ ggplot(sets_long_navd88) +
 <br>
 Facet by site to zoom in a bit.
 <br>
-```{r}
+```{r, fig.width = 7.1, fig.height = 8.2}
 ggplot(sets_long_navd88) +
     geom_point(aes(x = date, y = elevation_navd88, color = SET)) +
     facet_wrap(~SET, ncol = 3, scales = "free_y") +
@@ -127,7 +132,7 @@ kable(head(sets_navd88_mean))
 < br>
 Another plot to see how it looks now:
 <br>
-```{r}
+```{r, fig.width = 4.667, fig.height = 8}
 ggplot(sets_navd88_mean) +
     geom_point(aes(x = date, y = elevation_mean, color = SET)) +
     theme_minimal() +
@@ -197,7 +202,7 @@ These are obtained by subtracting 0.183 from all the other values, and these wil
 
 Adding `geom_abline` to the graphs with x-axis as the year involved some calculations, per this stackoverflow answer: https://stackoverflow.com/questions/21946896/how-to-add-abline-in-ggplot2-with-x-axis-as-year
 
-```{r}
+```{r SLR_calc}
 
 # slope in m/day
 slr_slope <- 3.5/365.25/1000
@@ -216,7 +221,7 @@ mllw_int <- -0.183 - slr_slope*as.integer(as.Date("2011-08-31"))
 ## Lines but no shading
 
 
-```{r}
+```{r NAVD88plot_lines, fig.width = 5.1, fig.height = 6.4}
 ggplot(sets_navd88_mean, aes(x=date, y=elevation_mean)) +
     geom_point(aes(col=SET), alpha=0.5, size=3) +
     theme_minimal() +
@@ -235,7 +240,7 @@ __Facet because this is weird__
 
 <br>
 
-```{r}
+```{r NAVD88plots_lines_faceted, fig.width = 5.3, fig.height = 8.5}
 ggplot(sets_navd88_mean, aes(x=date, y=elevation_mean)) +
     geom_point(aes(col=SET), alpha=0.5, size=3) +
     theme_minimal() +
@@ -274,7 +279,7 @@ __Sanity check: just horizonal lines; don't try to show SLR; just the tidal datu
 +  MLLW -0.183  
 +  NAVD88 0.000 
 
-```{r}
+```{r NAVD88plot_horizontallines, fig.width = 5.3, fig.height = 8.5}
 ggplot(sets_navd88_mean, aes(x=date, y=elevation_mean)) +
     geom_point(aes(col=SET), alpha=0.5, size=3) +
     theme_minimal() +
@@ -290,8 +295,126 @@ ggplot(sets_navd88_mean, aes(x=date, y=elevation_mean)) +
 ```
 
 
-STILL NEED TO:  
 
-+  Add in 'site' column for aggregating  
-+  make the shaded graph
+# Aggregate by site
+
+
+```{r siteAssociation_analyses}
+
+# make a data frame of the sites
+
+# first make vectors for each site
+CLMA <- c("CLMAJ-1", "CLMAJ-2", "CLMAJ-3")
+PANN <- c("PANNE-1", "PANNE-2", "PANNE-3")
+JULO <- c("JURO-1", "JURO-2", "JURO-3")
+JUUP <- c("JURO-4", "JURO-5", "JURO-6")
+SPAL <- c("SPAL-1", "SPAL-2", "SPAL-3")
+
+# bind the vectors into a data frame
+siteID <- bind_cols("CLMA" = CLMA, "PANN" = PANN, "JULO" = JULO, "JUUP" = JUUP, "SPAL" = SPAL) %>%
+    gather(key = "site", value = "SET")
+
+# remove the vectors
+rm(CLMA, PANN, JULO, JUUP, SPAL)
+```
+
+```{r}
+# bind the data frames together
+
+sets_navd88_mean <- left_join(sets_navd88_mean, siteID)
+kable(head(sets_navd88_mean))
+
+```
+
+
+
+# Plot with lines and shading
+
+
+```{r NAVD88plot_with_shading, fig.width = 5, fig.height = 8.5}
+# generate the color palette
+colors <- brewer.pal(3, "Blues")
+
+
+
+ggplot(sets_navd88_mean, aes(x=date, y=elevation_mean)) +
+    geom_ribbon(aes(ymin=-0.2, ymax=slr_slope*as.integer(date) + mlw_int), fill=colors[3]) +
+    geom_ribbon(aes(ymin=slr_slope*as.integer(date) + mlw_int, ymax=slr_slope*as.integer(date) + slr_int), fill=colors[2], alpha=0.5) +
+    geom_ribbon(aes(ymin=slr_slope*as.integer(date) + slr_int, ymax=slr_slope*as.integer(date) + mhw_int), fill=colors[1], alpha=0.5) +
+    geom_abline(aes(slope = slr_slope, intercept = slr_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mhw_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mlw_int), col="blue", lty=2) +
+    geom_point(aes(col=site), alpha=0.5, size=2.5) +
+    geom_smooth(method="lm", se = FALSE, aes(group=site, col=site)) +
+    theme_minimal() +
+    ggtitle("SETS through time relative to NAVD88") +
+    ylab("elevation (m)") +
+    ylim(-0.2,0.9)
+```
+
+
+Zoom in on the 4 near MHW
+
+```{r NAVD88plot_with_shading_zoomed, fig.width = 5, fig.height = 8.5}
+
+ggplot(sets_navd88_mean, aes(x=date, y=elevation_mean)) +
+    geom_ribbon(aes(ymin=0, ymax=slr_slope*as.integer(date) + slr_int), fill=colors[2], alpha=0.5) +
+    geom_ribbon(aes(ymin=slr_slope*as.integer(date) + slr_int, ymax=slr_slope*as.integer(date) + mhw_int), fill=colors[1], alpha=0.5) +
+    geom_abline(aes(slope = slr_slope, intercept = slr_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mhw_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mlw_int), col="blue", lty=2) +
+    geom_point(aes(col=site), alpha=0.8, size=2.5) +
+    geom_smooth(method="lm", se = FALSE, aes(group=site, col=site), lwd = 1.25) +
+    theme_minimal() +
+    ggtitle("SETS through time relative to NAVD88") +
+    ylab("elevation (m)") +
+    ylim(0,0.4)
+```
+
+Lines for each SET station
+
+```{r NAVD88plot_with_shading_lmbySET, fig.width = 5, fig.height = 8.5}
+
+ggplot(sets_navd88_mean, aes(x=date, y=elevation_mean)) +
+    # geom_ribbon(aes(ymin=0.1, ymax=slr_slope*as.integer(date) + mhw_int), fill=colors[1], alpha=0.5) +
+    geom_abline(aes(slope = slr_slope, intercept = slr_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mhw_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mlw_int), col="blue", lty=2) +
+    geom_point(aes(col=site), alpha=0.5, size=2) +
+    # geom_smooth(method="lm", se = FALSE, aes(group=site, col=site), lwd = 1.25) +
+    geom_smooth(method="lm", se = FALSE, aes(group=SET, col = site), lwd = 1, alpha = 0.6) +
+    theme_minimal() +
+    ggtitle("SETS through time relative to NAVD88") +
+    ylab("elevation (m)") +
+    ylim(0.1,0.4)
+```
+
+
+Zoom in on Juncus sites
+
+Lines for each SET station
+
+```{r NAVD88plot_with_shading_lmbySET_JURO, fig.width = 5, fig.height = 8.5}
+
+ggplot(sets_navd88_mean, aes(x=date, y=elevation_mean)) +
+    # geom_ribbon(aes(ymin=0.1, ymax=slr_slope*as.integer(date) + mhw_int), fill=colors[1], alpha=0.5) +
+    geom_abline(aes(slope = slr_slope, intercept = slr_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mhw_int), col="blue", lty=2) +
+    geom_abline(aes(slope = slr_slope, intercept = mlw_int), col="blue", lty=2) +
+    geom_point(aes(col=site), alpha=0.5, size=2) +
+    # geom_smooth(method="lm", se = FALSE, aes(group=site, col=site), lwd = 1.25) +
+    geom_smooth(method="lm", se = FALSE, aes(group=SET, col = site), lwd = 1, alpha = 0.6) +
+    theme_minimal() +
+    ggtitle("SETS through time relative to NAVD88") +
+    ylab("elevation (m)") +
+    ylim(0.2,0.35)
+```
+
+<br>
+<br>
+
+__Housekeeping__
+```{r}
+sessionInfo()
+```
 
