@@ -33,7 +33,8 @@ library(knitr)
 # library(EnvStats)
 library(RColorBrewer)
 # library(multcompView)
-source("functions_sentinel_sites.R")
+# source("functions_sentinel_sites.R") # replaced by my personal package 'nerrSET'
+library(nerrSET)
 
 # load the datasets
 load("SET_data_files.R")

@@ -1,7 +1,16 @@
 # library(tidyverse)
 
 
-# here is the function attempt.
+#' Attach site names to a data frame containing SET identifiers
+#' 
+#' This function generates a data frame of the 3 individual SETs belonging to each of 5 sites in Grand Bay's Sentinel Site Program. It reads in a data frame containing only SET IDs and adds a column containing the corresponding site.
+#'
+#' @param dat data frame you want to work with
+#' @param set_clm put this in quotes; the name of the column containing your SET IDs. Defaults to "SET" if nothing entered.
+#'
+#' @return the function returns a data frame.
+#' @export
+#'
 
 attach_site_names <- function(dat, set_clm = "SET") {
     
