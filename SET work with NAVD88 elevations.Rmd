@@ -33,6 +33,7 @@ library(knitr)
 # library(EnvStats)
 library(RColorBrewer)
 # library(multcompView)
+source("functions_sentinel_sites.R")
 
 # load the datasets
 load("SET_data_files.R")
@@ -144,6 +145,12 @@ ggplot(sets_navd88_mean) +
 
 ## Add in column for site
 <br>
+
+This is where the sourced `functions_sentinel_sites.R` script comes in.
+
+```{r}
+sets_navd88_mean <- attach_site_names(sets_navd88_mean)
+```
 
 
 # Sea Level Rise stuff
@@ -292,38 +299,6 @@ ggplot(sets_navd88_mean, aes(x=date, y=elevation_mean)) +
     ggtitle("SETS through time relative to NAVD88") +
     ylab("elevation (m)") +
     ylim(-0.3,1.0)
-```
-
-
-
-# Aggregate by site
-
-
-```{r siteAssociation_analyses}
-
-# make a data frame of the sites
-
-# first make vectors for each site
-CLMA <- c("CLMAJ-1", "CLMAJ-2", "CLMAJ-3")
-PANN <- c("PANNE-1", "PANNE-2", "PANNE-3")
-JULO <- c("JURO-1", "JURO-2", "JURO-3")
-JUUP <- c("JURO-4", "JURO-5", "JURO-6")
-SPAL <- c("SPAL-1", "SPAL-2", "SPAL-3")
-
-# bind the vectors into a data frame
-siteID <- bind_cols("CLMA" = CLMA, "PANN" = PANN, "JULO" = JULO, "JUUP" = JUUP, "SPAL" = SPAL) %>%
-    gather(key = "site", value = "SET")
-
-# remove the vectors
-rm(CLMA, PANN, JULO, JUUP, SPAL)
-```
-
-```{r}
-# bind the data frames together
-
-sets_navd88_mean <- left_join(sets_navd88_mean, siteID)
-kable(head(sets_navd88_mean))
-
 ```
 
 
