@@ -1,0 +1,398 @@
+---
+title: "SET Analyses - full pin time series; partial MH"
+date: "`r Sys.Date()`"
+output: 
+    html_document:
+        keep_md: false
+        code_folding: 'hide'
+        toc: yes
+        toc_depth: 4
+        toc_float: 
+            collapsed: false
+        fig_width: 7
+        fig_height: 9
+---
+
+
+## Setup; data wrangling 
+
+```{r setup_analyses, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+```
+
+
+### Loading libraries and datasets
+
+```{r importAndFormat_analyses}
+# open up important libraries
+library(tidyverse)
+library(lubridate)
+library(knitr)
+library(broom)
+library(agricolae)
+library(gridExtra)
+library(plotly)
+library(EnvStats)
+# library(multcompView)
+
+# load the datasets
+load("SET_data_files.R")
+
+```
+
+
+The code above loaded a series of data frames created from the `Rates.Rmd` file. Contents are the following:  
+
++  Raw data:
+    +  `markers_long`  
+    +  `sets_long`  
++  Calculated rates:
+    +  `allRates` - pin and MH rates, averaged by SET   
+    +  `rates_pins` - raw pin rates; 36 per SET    
+    +  `rates_MHs` - raw MH rates; 3 per SET  
+
+    
+### Adding site names to the datasets
+
+Sites are as follows:  
+
+-  __CLMA = Cladium:__
+    - CLMAJ-1 
+    - CLMAJ-2 
+    - CLMAJ-3
+-  __PANN = Panne:__
+    - PANNE-1
+    - PANNE-2
+    - PANNE-3
+-  __JULO = Lower Juncus:__
+    - JURO-1
+    - JURO-2
+    - JURO-3
+-  __JUUP = Upper Juncus:__
+    - JURO-4
+    - JURO-5
+    - JURO-6
+-  __SPAL = Spartina:__
+    - SPAL-1
+    - SPAL-2
+    - SPAL-3
+    
+    
+<a href="#top">Back to top</a>
+
+
+
+The code below generates a data frame of site IDs and associated SETs.
+        
+```{r siteAssociation_analyses}
+
+# make a data frame of the sites
+
+# first make vectors for each site
+CLMA <- c("CLMAJ-1", "CLMAJ-2", "CLMAJ-3")
+PANN <- c("PANNE-1", "PANNE-2", "PANNE-3")
+JULO <- c("JURO-1", "JURO-2", "JURO-3")
+JUUP <- c("JURO-4", "JURO-5", "JURO-6")
+SPAL <- c("SPAL-1", "SPAL-2", "SPAL-3")
+
+# bind the vectors into a data frame
+siteID <- bind_cols("CLMA" = CLMA, "PANN" = PANN, "JULO" = JULO, "JUUP" = JUUP, "SPAL" = SPAL) %>%
+    gather(key = "site", value = "SET")
+
+# remove the vectors
+rm(CLMA, PANN, JULO, JUUP, SPAL)
+```
+
+
+The next code uses the data frame generated above to add a 'site' column to each of the loaded data frames.
+
+```{r updateDataFrames_analyses}
+# add a column into the rates data frame, matching site to SET
+# by merging the data frames
+allRates <- merge(allRates, siteID, by="SET", all.x=TRUE)
+markers_long <- merge(markers_long, siteID, by="SET", all.x=TRUE)
+sets_long <- merge(sets_long, siteID, by="SET", all.x=TRUE)
+rates_pins <- merge(rates_pins, siteID, by="SET", all.x=TRUE)
+rates_MHs <- merge(rates_MHs, siteID, by="SET", all.x=TRUE)
+```
+
+
+Here, we check the heads (and one tail) of the data frames, to make sure site got added in correctly. 
+
+```{r checkHeads_analyses}
+# check the heads of the data frames
+# kable(head(allRates, 3), caption="head of allRates (calculated data)", align='c')
+# kable(tail(allRates, 3), caption="tail of allRates (calculated data)", align='c')
+# kable(head(markers_long, 3), caption="head of markers_long (QCd raw data)", align='c')
+# kable(head(sets_long, 3), caption="head of sets_long (QCd raw data)", align='c')
+# kable(head(rates_pins, 3), caption="head of rates_pins (calculated data)", align='c')
+# kable(head(rates_MHs, 3), caption="head of rates_MHs (calculated data)", align='c')
+```
+
+<a href="#top">Back to top</a>
+
+
+
+## Subsetting
+
+We only want to look at the last 3 years, when SETs and MHs were measured consistently on the same dates, and when feldspar didn't need to be re-laid. This should help us look at subsidence.
+
+
+Eventually, will calculate annualized rates of change for each. For now, I just want to get them subsetted and on the same graph.
+
+
+```{r}
+markers_long_lastlaying <- markers_long %>%
+    group_by(SET, MHplot) %>%
+    filter(ref_date >= max(ref_date))
+```
+
+
+## Change since 'time 0'
+
+
+Don't need to calculate this for markers because that's what the reading means. Do need to average it per MHplot though.
+
+For pins, this was already calculated earlier in a previous script, and is the field `totalchange` in this data frame.
+
+So here, I'm just summarizing things.
+
+```{r}
+# get an average and SE for each SET/date
+sets_long_summ <- sets_long %>%
+    ungroup() %>%
+    group_by(site, SET, date) %>%
+    summarize(meanChange = mean(totalchange, na.rm=TRUE),
+              seChange = sd(totalchange, na.rm=TRUE)/sqrt(length(totalchange)),
+              nChange = length(totalchange))
+
+```
+
+Averaged readings for a single MH plot by date; into an intermediate data frame.
+
+Then averaged readings of MH plots per SET per date, into the summary data frame that will be used for plotting.  
+
+This way, if different MHplots had different numbers of readings on a given date, they're not unevenly weighted. Each MHplot is even by averaging within plots first.
+
+```{r}
+markers_long_intermed <- markers_long_lastlaying %>%
+    ungroup() %>%
+    group_by(site, SET, MHplot, date) %>%
+    summarize(meanSed = mean(value, na.rm=TRUE))
+
+markers_long_summ <- markers_long_intermed %>%
+    ungroup() %>%
+    group_by(site, SET, date) %>%
+    summarize(meanSed = mean(meanSed, na.rm=TRUE))
+```
+
+
+
+## Graph  
+
+### SETs alone first
+
+
+```{r, fig.width=8, fig.height=5}
+ggplot(sets_long_summ) +
+    geom_point(aes(x=date, y=meanChange, col=site), size=2, alpha=0.7) +
+    facet_wrap(~site) +
+    theme_bw() +
+    ggtitle("Cumulative Change", subtitle = "pin heights over time \nsince first reading") +
+    xlab("Date") +
+    ylab("change (mm)")
+
+
+# 
+# ggplot() +
+#     geom_point(data=markers_long_summ, aes(x=date, y=meanSed), col="gray22") +
+#     geom_point(data=sets_long_summ, aes(x=date, y=meanChange, col=site), size=2, alpha=0.5) +
+#     facet_wrap(~site, ncol=1) +
+#     theme_bw() +
+#     ggtitle("Cumulative Change", subtitle = "pin heights over time") +
+#     xlab("Date") +
+#     ylab("change (mm)")
+```
+
+
+
+### MHs alone
+
+#### Just points
+
+```{r}
+
+ggplot(markers_long_intermed) +
+    geom_point(aes(x=date, y=meanSed, col=as.factor(MHplot), shape=as.factor(MHplot)), size=2, alpha=0.6) +
+    facet_wrap(~SET, ncol=3) +
+    theme_bw() +
+    ggtitle("Mean Sediment Height by MHplot", subtitle = "MHplots over time") +
+    xlab("Date") +
+    ylab("change (mm)")
+```
+
+
+
+#### Points and loess smooth
+
+```{r}
+ggplot(markers_long_intermed) +
+    geom_point(aes(x=date, y=meanSed, col=as.factor(MHplot), shape=as.factor(MHplot)), size=3, alpha=0.5) +
+    geom_smooth(aes(x=date, y=meanSed), se=FALSE) +
+    facet_wrap(~SET, ncol=3) +
+    theme_bw() +
+    ggtitle("Mean Sediment Height by MHplot", subtitle = "MHplots over time") +
+    xlab("Date") +
+    ylab("change (mm)")
+
+
+```
+
+
+
+### Combined Plots
+
+What about just adding the pin readings on top of those loess smooths?  
+
+***
+***
+
+#### pins - linear regression; MHs - loess (1 per SET)
+One loess per SET's MHs; linear regression for pins:
+
+```{r}
+
+# ungroup the pin readings, just in case
+sets_long_summ <- ungroup(sets_long_summ) %>%
+    group_by(SET)
+
+ggplot() +
+    geom_point(data = markers_long_intermed, aes(x=date, y=meanSed, col=as.factor(MHplot), shape=as.factor(MHplot)), size=2, alpha=0.5) +
+    geom_smooth(data = markers_long_intermed, aes(x=date, y=meanSed), se = FALSE) +
+    geom_point(data = sets_long_summ, aes(x=date, y=meanChange), col="navyblue", size=2.5) +
+    geom_smooth(data = sets_long_summ, aes(x=date, y=meanChange), method = "lm", col="navyblue", se = FALSE, size = 1.5) +
+    facet_wrap(~SET, ncol=3) +
+    theme_bw() +
+    ggtitle("Change over time", subtitle = "pins are navy; MHplots are lighter colors \nlinear regression on pins; loess on MHplots") +
+    xlab("Date") +
+    ylab("change (mm)")
+
+```
+
+
+***
+***
+
+
+#### pins - linear regression; MHs - loess (1 per MHplot; 3 per SET)
+
+Same graph, but with a loess for each individual MHplot:
+
+```{r}
+
+ggplot() +
+    geom_point(data = markers_long_intermed, aes(x=date, y=meanSed, col=as.factor(MHplot), shape=as.factor(MHplot)), size=2, alpha=0.5) +
+    geom_smooth(data = markers_long_intermed, aes(x=date, y=meanSed, col=as.factor(MHplot)), se=FALSE) +
+    geom_point(data = sets_long_summ, aes(x=date, y=meanChange), col="navyblue", size=2.5) +
+    geom_smooth(data = sets_long_summ, aes(x=date, y=meanChange), method = "lm", se = FALSE, col="navyblue", size=1.5) +
+    facet_wrap(~SET, ncol=3) +
+    theme_bw() +
+    ggtitle("Change over time", subtitle = "pins are navy; MHplots are lighter colors \nlinear regression on pins; loess on MHplots") +
+    xlab("Date") +
+    ylab("change (mm)")
+
+```
+
+
+***
+***
+
+
+#### pins - loess; MHs - loess (1 per MHplot; 3 per SET)
+
+Same graph, but with a loess for each individual MHplot, and loess for pins as well:
+
+```{r}
+
+ggplot() +
+    geom_point(data = markers_long_intermed, aes(x=date, y=meanSed, col=as.factor(MHplot), shape=as.factor(MHplot)), size=2, alpha=0.5) +
+    geom_smooth(data = markers_long_intermed, aes(x=date, y=meanSed, col=as.factor(MHplot)), se=FALSE) +
+    geom_point(data = sets_long_summ, aes(x=date, y=meanChange), col="navyblue", size=2.5) +
+    geom_smooth(data = sets_long_summ, aes(x=date, y=meanChange), method = "loess", se = FALSE, col="navyblue", size=1.5) +
+    facet_wrap(~SET, ncol=3) +
+    theme_bw() +
+    ggtitle("Change over time", subtitle = "pins are navy; MHplots are lighter colors \nloess on pins and MHplots") +
+    xlab("Date") +
+    ylab("change (mm)")
+
+```
+
+***
+***
+
+
+
+#### pins - loess; MHs - loess (1 per SET)
+
+```{r}
+
+ggplot() +
+    geom_point(data = markers_long_intermed, aes(x=date, y=meanSed, col=as.factor(MHplot), shape=as.factor(MHplot)), size=2, alpha=0.5) +
+    geom_smooth(data = markers_long_intermed, aes(x=date, y=meanSed), se=FALSE) +
+    geom_point(data = sets_long_summ, aes(x=date, y=meanChange), col="navyblue", size=2.5) +
+    geom_smooth(data = sets_long_summ, aes(x=date, y=meanChange), method = "loess", se = FALSE, col="navyblue", size=1.5) +
+    facet_wrap(~SET, ncol=3) +
+    theme_bw() +
+    ggtitle("Change over time", subtitle = "pins are navy; MHplots are lighter colors \nloess on pins and MHplots") +
+    xlab("Date") +
+    ylab("change (mm)")
+
+```
+
+
+***
+***
+
+
+
+#### pins - linear regression; MHs - linear regression (1 per SET)
+
+```{r}
+
+ggplot() +
+    geom_point(data = markers_long_intermed, aes(x=date, y=meanSed, col=as.factor(MHplot), shape=as.factor(MHplot)), size=2, alpha=0.5) +
+    geom_smooth(data = markers_long_intermed, aes(x=date, y=meanSed), method = "lm", se=FALSE) +
+    geom_point(data = sets_long_summ, aes(x=date, y=meanChange), col="navyblue", size=2.5) +
+    geom_smooth(data = sets_long_summ, aes(x=date, y=meanChange), method = "lm", se = FALSE, col="navyblue", size=1.5) +
+    facet_wrap(~SET, ncol=3) +
+    theme_bw() +
+    ggtitle("Change over time", subtitle = "pins are navy; MHplots are lighter colors \nlinear regression on pins and MHplots") +
+    xlab("Date") +
+    ylab("change (mm)")
+
+```
+
+
+***
+***
+
+
+
+#### pins - linear regression; MHs - linear regression (1 per MHplot; 3 per SET)
+
+```{r}
+
+ggplot() +
+    geom_point(data = markers_long_intermed, aes(x=date, y=meanSed, col=as.factor(MHplot), shape=as.factor(MHplot)), size=2, alpha=0.5) +
+    geom_smooth(data = markers_long_intermed, aes(x=date, y=meanSed, col = as.factor(MHplot)), method = "lm", se=FALSE) +
+    geom_point(data = sets_long_summ, aes(x=date, y=meanChange), col="navyblue", size=2.5) +
+    geom_smooth(data = sets_long_summ, aes(x=date, y=meanChange), method = "lm", se = FALSE, col="navyblue", size=1.5) +
+    facet_wrap(~SET, ncol=3) +
+    theme_bw() +
+    ggtitle("Change over time", subtitle = "pins are navy; MHplots are lighter colors \nlinear regression on pins and MHplots") +
+    xlab("Date") +
+    ylab("change (mm)")
+
+```

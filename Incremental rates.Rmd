@@ -1,0 +1,155 @@
+---
+title: "Incremental Rates"
+date: "`r Sys.Date()`"
+output: 
+    html_document:
+        keep_md: false
+        code_folding: 'hide'
+        toc: yes
+        toc_float: true
+        toc_depth: 4
+---
+
+# Setup; data wrangling 
+
+```{r setup_analyses, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+```
+
+
+## Loading libraries and datasets
+
+```{r importAndFormat_analyses}
+# open up important libraries
+library(tidyverse)
+library(lubridate)
+library(knitr)
+library(broom)
+library(agricolae)
+library(gridExtra)
+library(plotly)
+library(EnvStats)
+library(ggbeeswarm)
+library(nerrSET)
+# library(multcompView)
+
+# load the datasets
+load("SET_data_files.R")
+
+```
+
+## Add a 'month' column to help filter incremental changes  
+
+Also assign seasons and site names
+
+```{r}
+
+sets_long <- attach_site_names(sets_long)
+sets_long2 <- sets_long %>%
+    mutate(month = month(date),
+           quarter = case_when(month %in% c(1,2,3) ~ 1,
+                               month %in% c(4,5,6) ~ 2,
+                               month %in% c(7,8,9) ~ 3,
+                               month %in% c(10,11,12) ~ 4))
+
+kable(head(sets_long2, 12))
+kable(table(sets_long2$month), caption = "count of each month in dataset")
+kable(table(sets_long2$quarter), caption = "count of each quarter in dataset")
+```
+
+## Break it out by quarter and generate rates per year  
+
+```{r}
+sets_q1 <- sets_long2 %>%
+    filter(quarter == 1)
+
+sets_q2 <- sets_long2 %>%
+    filter(quarter == 2)
+
+sets_q3 <- sets_long2 %>%
+    filter(quarter == 3)
+
+sets_q4 <- sets_long2 %>%
+    filter(quarter == 4)
+```
+
+# Calculate rates by quarter
+
+### Function to calculate on quarterly data frames
+```{r}
+
+ratesperyr <- function(dat){
+    out <- dat %>%
+        group_by(SET, arm, pin) %>%
+        arrange(SET, arm, pin, date) %>%
+        mutate(lagvalue = lag(value, 1),
+               lagdate = lag(date, 1),
+               change = value - lagvalue,
+               datediff = as.numeric(date - lagdate),
+               rateperyr = change * 365.25 / datediff)
+    return(out)
+}
+```
+
+### Calculations
+
+```{r}
+sets_q1 <- ratesperyr(sets_q1)
+sets_q2 <- ratesperyr(sets_q2)
+sets_q3 <- ratesperyr(sets_q3)
+sets_q4 <- ratesperyr(sets_q4)
+
+kable(head(sets_q1), caption = "rates in q1")
+kable(head(sets_q2), caption = "rates in q2")
+kable(head(sets_q3), caption = "rates in q3")
+kable(head(sets_q4), caption = "rates in q4")
+
+```
+
+### Plot individual pin rates
+
+```{r, fig.width = 4.25, fig.height = 10}
+ggplot(sets_q1) +
+    geom_histogram(aes(rateperyr)) +
+    facet_grid(SET~.) +
+    theme_bw()
+```
+
+
+```{r, fig.width = 11, fig.height = 5.2}
+ggplot(sets_q1, aes(x = SET, y = rateperyr, color = site)) +
+    geom_quasirandom() +
+    theme_bw() +
+    ggtitle("Distribution of Q1-to-Q1 change rates for each pin")
+
+ggplot(sets_q1, aes(x = SET, y = rateperyr, color = site)) +
+    geom_quasirandom() +
+    geom_hline(yintercept = 0, color = "black", size = 1) +
+    geom_hline(yintercept = 3.5, color = "blue", lty = 2, size = 1) +
+    theme_bw() +
+    ggtitle("Distribution of Q1-to-Q1 change rates for each pin", subtitle = "black line is 0; \nblue line is 3.5 (rate of local SLR)")
+```
+
+
+
+### Start averaging
+
+#### By SET, by date
+
+```{r}
+sets_q1_agg <- sets_q1 %>%
+    ungroup() %>%
+    group_by(site, SET, date) %>%
+    summarize(annual_rate = mean(rateperyr, na.rm = TRUE))
+```
+
+```{r, fig.width = 4, fig.height = 10}
+ggplot() +
+    geom_point(data = sets_q1, aes(x = date, y = rateperyr, color = site)) +
+    geom_line(data = sets_q1_agg, aes(x = date, y = annual_rate, color = site), size = 1) +
+    facet_grid(SET~.) +
+    ggtitle("Distribution of pin change rates over time", subtitle = "line connects average value \nfor each SET on each date") +
+    theme_bw()
+```
