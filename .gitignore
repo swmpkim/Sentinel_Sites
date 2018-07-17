@@ -23,3 +23,13 @@ Inundation tools/NWLON sample data - Flooding tools.xlsm
 Inundation tools/RE tidal inundation spreadsheet.msg
 panne_imagery.jpg
 QC_plots.html
+*.html
+*.md
+Inundation tools/TTW workshop materials/Inundation Tool and Sample Data/Inundation Data - Flooding tools (2).xlsm
+*.xlsm
+*.pptx
+*.jpg
+SET-to-dos.txt
+Shiny/app.R
+Shiny/app2.R
+SET_data_files.R

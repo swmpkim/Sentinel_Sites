@@ -35,6 +35,7 @@ library(agricolae)
 library(gridExtra)
 library(plotly)
 library(EnvStats)
+library(nerrSET)
 # library(multcompView)
 
 # load the datasets
@@ -80,42 +81,16 @@ Sites are as follows:
     - SPAL-3
     
     
-<a href="#top">Back to top</a>
 
 
+The code below uses the `nerrSET` package (on my machine only) to add site names to the data frames.  
 
-The code below generates a data frame of site IDs and associated SETs.
-        
-```{r siteAssociation_analyses}
-
-# make a data frame of the sites
-
-# first make vectors for each site
-CLMA <- c("CLMAJ-1", "CLMAJ-2", "CLMAJ-3")
-PANN <- c("PANNE-1", "PANNE-2", "PANNE-3")
-JULO <- c("JURO-1", "JURO-2", "JURO-3")
-JUUP <- c("JURO-4", "JURO-5", "JURO-6")
-SPAL <- c("SPAL-1", "SPAL-2", "SPAL-3")
-
-# bind the vectors into a data frame
-siteID <- bind_cols("CLMA" = CLMA, "PANN" = PANN, "JULO" = JULO, "JUUP" = JUUP, "SPAL" = SPAL) %>%
-    gather(key = "site", value = "SET")
-
-# remove the vectors
-rm(CLMA, PANN, JULO, JUUP, SPAL)
-```
-
-
-The next code uses the data frame generated above to add a 'site' column to each of the loaded data frames.
-
-```{r updateDataFrames_analyses}
-# add a column into the rates data frame, matching site to SET
-# by merging the data frames
-allRates <- merge(allRates, siteID, by="SET", all.x=TRUE)
-markers_long <- merge(markers_long, siteID, by="SET", all.x=TRUE)
-sets_long <- merge(sets_long, siteID, by="SET", all.x=TRUE)
-rates_pins <- merge(rates_pins, siteID, by="SET", all.x=TRUE)
-rates_MHs <- merge(rates_MHs, siteID, by="SET", all.x=TRUE)
+```{r}
+allRates <- attach_site_names(allRates, "SET")
+markers_long <- attach_site_names(markers_long, "SET")
+sets_long <- attach_site_names(sets_long, "SET")
+rates_pins <- attach_site_names(rates_pins)
+rates_MHs <- attach_site_names(rates_MHs)
 ```
 
 
@@ -131,13 +106,11 @@ Here, we check the heads (and one tail) of the data frames, to make sure site go
 # kable(head(rates_MHs, 3), caption="head of rates_MHs (calculated data)", align='c')
 ```
 
-<a href="#top">Back to top</a>
-
 
 
 ## Subsetting
 
-We only want to look at the last 3 years, when SETs and MHs were measured consistently on the same dates, and when feldspar didn't need to be re-laid. This should help us look at subsidence.
+We only want to look at the most recent laying of feldspar for each MHplot. This should help us look at subsidence.
 
 
 Eventually, will calculate annualized rates of change for each. For now, I just want to get them subsetted and on the same graph.

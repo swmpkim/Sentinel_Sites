@@ -1,0 +1,104 @@
+---
+title: "MH measurements"
+author: "Kim Cressman"
+date: "July 6, 2018"
+output: pdf_document
+---
+
+
+In this file I want to make an easy way to see when MH measurements were able to be taken in each plot.
+
+__Initial RMD setup__
+<br>
+
+```{r setup_analyses, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+```
+
+__Loading libraries and data sets__
+<br>
+```{r importAndFormat_analyses}
+# open up important libraries
+library(tidyverse)
+library(lubridate)
+library(knitr)
+library(RColorBrewer)
+library(nerrSET)
+library(paletteer)
+
+# load the datasets
+load("SET_data_files.R")
+
+```
+
+
+```{r}
+MHplot_counts <- markers_long %>%
+    ungroup() %>%
+    group_by(SET, MHplot, date) %>%
+    summarize(marker_count = sum(!is.na(value)))
+
+MHstation_counts <- MHplot_counts %>%
+    ungroup() %>%
+    group_by(SET, date) %>%
+    summarize(plot_count = sum(!is.na(marker_count))) %>%
+    arrange(SET, date)
+```
+
+
+```{r}
+plot(plot_count ~ date, data = MHstation_counts)
+```
+
+```{r}
+library(naniar)
+
+ggplot(markers_long, aes(x = date, y = value)) +
+    geom_point() +
+    facet_grid(SET ~ MHplot) +
+    theme_minimal()
+
+markers_long2 <- markers_long %>%
+    mutate(value2 = value + 1)
+ggplot(markers_long2, aes(x = date, y = value2)) +
+    geom_miss_point() +
+    facet_wrap(~SET) +
+    theme_minimal()
+
+ggplot(MHstation_counts) +
+    geom_point(aes(x = date, y = SET, size = plot_count)) +
+    theme_minimal()
+
+MHplot_counts <- MHplot_counts %>%
+    mutate(site.plot = paste0(SET, "-", MHplot),
+           site.rep = substr(SET, nchar(as.character(SET)),
+                             nchar(as.character(SET))))
+ggplot(MHplot_counts) +
+    geom_point(aes(x = date, 
+                   y = site.plot, 
+                   col = site.rep, 
+                   size = marker_count),
+               alpha = 0.8) +
+    scale_color_manual(values = brewer.pal(9, "YlGnBu")[4:9]) +
+    theme_minimal()
+
+
+```
+
+THIS IS THE ONE  
+It's really busy though  
+Would be nice to get some more vertical space between sites  
+
+```{r}
+ggplot(MHplot_counts) +
+    geom_point(aes(x = date, 
+                   y = site.plot, 
+                   col = site.rep, 
+                   size = marker_count)) +
+    scale_color_brewer(palette = "PuBuGn", direction = -1) +
+    theme_minimal()
+```
+
+
