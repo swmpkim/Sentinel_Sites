@@ -1,0 +1,468 @@
+---
+title: "MHs from the start"
+author: "Kim Cressman"
+date: "July 18, 2018"
+mainfont: Arial
+output: 
+    html_document:
+        css: C:/Users/kimberly.cressman/Documents/R/win-library/3.5/summarytools/includes/stylesheets/summarytools.css
+        toc: true
+        toc_depth: 4
+        toc_float: yes
+        code_folding: hide 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+__Initial RMD setup__
+<br>
+
+```{r setup_analyses, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+```
+
+__Loading libraries and data sets__
+<br>
+```{r importAndFormat_analyses}
+# open up important libraries
+library(tidyverse)
+library(lubridate)
+library(knitr)
+library(RColorBrewer)
+library(nerrSET)
+library(paletteer)
+library(plotly)
+library(skimr)
+library(summarytools)
+library(ggbeeswarm)
+```
+
+```{r}
+# load the datasets
+load("SET_data_files.R")
+
+# get rid of everything but markers_long and sets_long
+rm(list = c('allRates', 'rates_MHs', 'rates_pins'))
+```
+
+
+# Subset the data frame  
+
+Get rid of any MH measurements on horizons laid after 3/2/2012.  
+
+
+```{r}
+markers2 <- markers_long %>%
+    group_by(SET, MHplot) %>%
+    filter(ref_date <= "2012-03-02")
+```
+
+
+## Attach Site names  
+
+```{r}
+markers2 <-  attach_site_names(markers2)
+```
+
+
+# Graph all the raw values  
+
+
+Make a function to loop through the sites in the data frame  
+
+```{r}
+stns <- unique(markers2$site)
+
+# create a container for our output
+output <- htmltools::tagList()
+        
+        
+for(i in 1:length(stns)) {
+    # subset data
+    dat <- markers2 %>%
+        filter(site == stns[i])
+    # generate title
+    maintitle <- as.character(stns[i])
+    # make a plot
+    p <- ggplot(dat, aes(x = date, 
+                         y = value, 
+                         group = reading,
+                         text = paste("Date:", as.character(date),
+                                      "\nreading:", value,
+                                      "\nfeldspar applied:", as.character(ref_date)))) +
+        geom_point(size = 2, 
+                   alpha = 0.5,
+                   col = "darkslategray") +
+        facet_grid(MHplot~SET, scales = "free_y") +
+        ggtitle(maintitle, subtitle = "rows are MHplots; columns are SETs") +
+        # scale_color_brewer("BuGn", direction = -1) +
+        theme_bw() +
+        theme(legend.position = "none")
+    
+    # output the plot
+    output[[i]] <- as_widget(ggplotly(p, tooltip = c("text")))
+}
+```
+
+```{r}
+output
+```
+
+
+# Incremental Changes  
+
+Calculate incremental change: first have to summarize by date, then subtract and calculate.
+
+```{r}
+markers3 <- markers2 %>%
+    group_by(site, SET, MHplot, date) %>%
+    summarize(plotmean = mean(value, na.rm = TRUE)) %>%
+    mutate(inc_change = plotmean - lag(plotmean, 1),
+           plotdatediff = as.numeric(date - lag(date, 1)),
+           inc_rate = (inc_change / plotdatediff) * 365.25)
+```
+
+
+For informational purposes, let's summarize this data frame.
+
+```{r, results='asis'}
+markers3 %>% 
+    ungroup() 
+
+print(dfSummary(markers3, graph.magnif = 0.75), method = "render")
+```
+
+```{r}
+markers3b <- markers3 %>%
+    ungroup()
+
+print(dfSummary(markers3b, graph.magnif = 0.75), method = "render")
+```
+
+
+By site  
+
+```{r}
+# by site
+markers3c <-  markers3 %>% 
+    ungroup() %>% 
+    group_by(site) %>%
+    
+print(dfSummary(markers3c, graph.magnif = 0.75), method = "render")
+```
+
+
+## summarize incremental rates  
+
+### by MHplot  
+
+```{r}
+markers4 <- markers3 %>%
+    ungroup() %>%
+    group_by(site, SET, MHplot) %>%
+    summarize(mean_inc_change = mean(inc_change, na.rm = TRUE),
+              sd_inc_change = sd(inc_change, na.rm = TRUE),
+              mean_inc_rate = mean(inc_rate, na.rm = TRUE),
+              sd_inc_rate = sd(inc_rate, na.rm = TRUE))
+
+markers4b  <- markers4 %>%  
+    ungroup() %>% 
+    group_by(site) 
+
+print(dfSummary(markers4b, graph.magnif = 0.75), method = "render")
+    
+knitr::kable(markers4b, align = "c")
+```
+
+### by SET  
+
+```{r}
+markers5 <- markers4 %>%
+    ungroup() %>%
+    group_by(site, SET) %>%
+    summarize(mean_inc_change = mean(mean_inc_change, na.rm = TRUE),
+              sd_inc_change = sd(sd_inc_change, na.rm = TRUE),
+              mean_inc_rate = mean(mean_inc_rate, na.rm = TRUE),
+              sd_inc_rate = sd(sd_inc_rate, na.rm = TRUE))
+
+print(dfSummary(markers5, graph.magnif = 0.75), method = "render")
+
+knitr::kable(markers5, align = "c")
+```
+
+
+### by site  
+
+```{r}
+markers6 <- markers5 %>%
+    ungroup() %>%
+    group_by(site) %>%
+    summarize(mean_inc_change = mean(mean_inc_change, na.rm = TRUE),
+              sd_inc_change = sd(sd_inc_change, na.rm = TRUE),
+              mean_inc_rate = mean(mean_inc_rate, na.rm = TRUE),
+              sd_inc_rate = sd(sd_inc_rate, na.rm = TRUE))
+
+print(dfSummary(markers6, graph.magnif = 0.75), method = "render")
+
+knitr::kable(markers6, align = "c")
+```
+
+# plot again  
+
+```{r}
+stns <- unique(markers3$site)
+
+# create a container for our output
+changeoutput <- htmltools::tagList()
+rateoutput <- htmltools::tagList()
+        
+        
+for(i in 1:length(stns)) {
+    # subset data
+    dat <- markers3 %>%
+        filter(site == stns[i])
+    # generate title
+    maintitle <- as.character(stns[i])
+    # make a plot
+    p <- ggplot(dat, aes(x = date, 
+                         y = inc_change, 
+                         group = MHplot,
+                         col = as.factor(MHplot),
+                         text = paste("Date:", 
+                                      as.character(date),
+                                      "\nChange since last reading:", 
+                                      round(inc_change, 2),
+                                      "\nDays since last reading:", 
+                                      plotdatediff,
+                                      "\nRate since last reading:", 
+                                      round(inc_rate, 2)))) +
+        geom_point(size = 2, 
+                   alpha = 0.5) +
+        facet_wrap(~SET, scales = "free_y", ncol = 1) +
+        ggtitle(maintitle, subtitle = "rows are MHplots; columns are SETs") +
+        # scale_color_brewer("BuGn", direction = -1) +
+        theme_bw() +
+        theme(legend.position = "none")
+    
+    # output the plot
+    changeoutput[[i]] <- as_widget(ggplotly(p, tooltip = c("text")))
+    
+    # make another plot, for rates
+    # make a plot
+    q <- ggplot(dat, aes(x = date, 
+                         y = inc_rate, 
+                         group = MHplot,
+                         col = as.factor(MHplot),
+                         text = paste("Date:", 
+                                      as.character(date),
+                                      "\nChange since last reading:", 
+                                      round(inc_change, 2),
+                                      "\nDays since last reading:", 
+                                      plotdatediff,
+                                      "\nRate since last reading:", 
+                                      round(inc_rate, 2)))) +
+        geom_point(size = 2, 
+                   alpha = 0.5) +
+        facet_wrap(~SET, scales = "free_y", ncol = 1) +
+        ggtitle(maintitle, subtitle = "rows are MHplots; columns are SETs") +
+        # scale_color_brewer("BuGn", direction = -1) +
+        theme_bw() +
+        theme(legend.position = "none")
+    
+    # output the plot
+    rateoutput[[i]] <- as_widget(ggplotly(q, tooltip = c("text")))
+}
+```
+
+## Plots of raw change since last reading  
+
+```{r, fig.width = 7, fig.height = 9}
+changeoutput
+```
+
+
+## Plots of rate since last reading  
+
+```{r, fig.width = 7, fig.height = 9}
+rateoutput
+```
+
+
+# Incremental changes by pin  
+
+```{r}
+sets <- attach_site_names(sets_long)
+
+sets2 <- sets %>%
+    ungroup() %>%
+    group_by(site, SET, arm, pin) %>%
+    mutate(inc_change = value - lag(value, 1),
+           datediff = as.numeric(date - lag(date, 1)),
+           inc_rate = (inc_change / datediff) * 365.25)
+
+print(dfSummary(sets2, graph.magnif = 0.75), method = "render")
+```
+
+
+## average that per date for each SET  
+
+```{r}
+sets3 <- sets2 %>% 
+    ungroup() %>% 
+    group_by(site, SET, date) %>% 
+    summarize(mean_inc_change = mean(inc_change, na.rm = TRUE),
+              sd_inc_change = sd(inc_change, na.rm = TRUE),
+              mean_inc_rate = mean(inc_rate, na.rm = TRUE),
+              sd_inc_rate = sd(inc_rate, na.rm = TRUE))
+
+print(dfSummary(sets3, graph.magnif = 0.75), method = "render")
+```
+
+### plot incremental change by date for sets  
+
+```{r}
+ggplot(sets3, aes(x = date, y = mean_inc_rate)) +
+    geom_point() +
+    facet_wrap(~SET, ncol = 3) +
+    theme_bw()
+```
+
+
+
+# MH and pin incremental changes together  
+
+
+make a data frame with  marker incremental change by SET by date   
+
+```{r}
+markers7 <- markers3 %>% 
+    ungroup() %>% 
+    group_by(site, SET, date) %>% 
+    summarize(mean_inc_change = mean(inc_change, na.rm = TRUE),
+              sd_inc_change = sd(inc_change, na.rm = TRUE),
+              mean_inc_rate = mean(inc_rate, na.rm = TRUE),
+              sd_inc_rate = sd(inc_rate, na.rm = TRUE))
+
+print(dfSummary(markers7, graph.magnif = 0.75), method = "render")
+```
+
+
+sets3 has pin incremental change by SET by date  
+
+put them on a graph together   
+
+```{r, fig.width = 9, fig.height = 7}
+p <- ggplot() +
+    geom_point(data=sets3, aes(x = date, y = mean_inc_rate, col = "pins")) +
+    geom_point(data=markers7, aes(x = date, y = mean_inc_rate, col = "markers")) +
+    scale_color_manual(values = c("pins" = "red", "markers" = "blue")) +
+    facet_wrap(~SET, ncol = 3) +
+    theme_bw()
+
+ggplotly(p)
+```
+
+
+Connect the dots:
+```{r}
+# p <- ggplot() +
+#     geom_point(data=sets3, aes(x = date, y = mean_inc_rate, col = "pins")) +
+#     geom_line(data=sets3, aes(x = date, y = mean_inc_rate, col = "pins")) +
+#     geom_point(data=markers7, aes(x = date, y = mean_inc_rate, col = "markers")) +
+#     geom_line(data=markers7, aes(x = date, y = mean_inc_rate, col = "markers"))
+#     scale_color_manual(values = c("pins" = "red", "markers" = "blue")) +
+#     facet_wrap(~SET, ncol = 3) +
+#     theme_bw()
+# 
+# ggplotly(p)
+```
+
+
+```{r}
+p <- ggplot() +
+    geom_col(width = 2, data=sets3, aes(x = date, y = mean_inc_rate, col = "pins")) +
+    geom_col(width = 2, data=markers7, aes(x = date, y = mean_inc_rate, col = "markers")) +
+    scale_color_manual(values = c("pins" = "red", "markers" = "blue")) +
+    facet_wrap(~SET, ncol = 3) +
+    theme_bw()
+
+ggplotly(p)
+```
+
+
+zoom in on the y-axis. some of these incremental rates are pretty crazy and I want to see the more moderate ones.  
+
+```{r}
+p <- ggplot() +
+    geom_col(width = 2, data=sets3, 
+             aes(x = date, y = mean_inc_rate, col = "pins"),
+             position = "dodge") +
+    geom_col(width = 2, data=markers7, 
+             aes(x = date, y = mean_inc_rate, col = "markers"),
+             position="dodge") +
+    scale_color_manual(values = c("pins" = "red", "markers" = "blue")) +
+    scale_y_continuous(limits = c(-30, 30)) +
+    facet_wrap(~SET, ncol = 3) +
+    theme_bw()
+
+p
+```
+
+```{r, fig.width = 9, fig.height = 7}
+p <- ggplot() +
+    geom_point(data=sets3, aes(x = date, y = mean_inc_rate, col = "pins")) +
+    geom_point(data=markers7, aes(x = date, y = mean_inc_rate, col = "markers")) +
+    scale_color_manual(values = c("pins" = "red", "markers" = "blue")) +
+    scale_y_continuous(limits = c(-30, 30)) +
+    facet_wrap(~SET, ncol = 3) +
+    theme_bw()
+
+ggplotly(p)
+```
+
+
+
+
+```{r, fig.width = 9, fig.height = 7}
+
+q <- ggplot() +
+    geom_quasirandom(data=sets3, aes(x = "pins", y = mean_inc_rate, col = "pins")) +
+    geom_quasirandom(data=markers7, aes(x = "markers", y = mean_inc_rate, col = "markers")) +
+    scale_color_manual(values = c("pins" = "red", "markers" = "blue")) +
+    facet_wrap(~SET, ncol = 3) +
+    theme_bw()
+
+ggplotly(q, tooltip = c('mean_inc_rate'))
+```
+
+# Summary of incremental change rates by SET  
+
+## Marker Horizons (accretion)  
+
+Make a summary table - average mean incremental rates of change for all dates at a SET
+
+```{r}
+markers8 <- markers7 %>% 
+    ungroup() %>% 
+    group_by(SET) %>% 
+    summarize(grand_mean_inc_change = mean(mean_inc_change, na.rm = TRUE),
+              grand_mean_inc_rate = mean(mean_inc_rate, na.rm = TRUE))
+kable(markers8, align = "c", caption = "Mean rates by SET for Marker Horizons")
+```
+
+
+## SETs  
+
+```{r}
+sets4 <- sets3 %>% 
+    ungroup() %>% 
+    group_by(SET) %>% 
+    summarize(grand_mean_inc_change = mean(mean_inc_change, na.rm = TRUE),
+              grand_mean_inc_rate = mean(mean_inc_rate, na.rm = TRUE))
+kable(sets4, align = "c", caption = "Mean rates by SET for elevation change")
+```
+

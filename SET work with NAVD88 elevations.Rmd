@@ -163,7 +163,9 @@ sets_navd88_mean <- attach_site_names(sets_navd88_mean)
 
 
 The rate of sea level rise (SLR) at the Dauphin Island Tide gauge through 2016 was 3.5 mm/yr. This gets updated every year and in 2017 was 3.61. More details can be found here: 
-https://tidesandcurrents.noaa.gov/sltrends/sltrends_station.shtml?stnid=8735180 
+https://tidesandcurrents.noaa.gov/sltrends/sltrends_station.shtml?stnid=8735180
+
+Updated link (12/4/18): https://tidesandcurrents.noaa.gov/sltrends/sltrends_station.shtml?id=8735180 
 
 
 Because R works in days, we need to convert 3.5 mm/yr into a rate per day. And because the NAVD88 stuff is in meters, we need this to become meters per day. The math for that is:
@@ -323,9 +325,10 @@ ggplot(sets_navd88_mean, aes(x=date, y=elevation_mean)) +
     geom_point(aes(col=site), alpha=0.5, size=2.5) +
     geom_smooth(method="lm", se = FALSE, aes(group=site, col=site)) +
     theme_minimal() +
-    ggtitle("SETS through time relative to NAVD88") +
-    ylab("elevation (m)") +
+    ggtitle("SETs through time \nrelative to rising seas") +
+    ylab("elevation (m) relative to NAVD88") +
     ylim(-0.2,0.9)
+    # ylim(0, 0.4)
 ```
 
 

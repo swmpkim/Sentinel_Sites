@@ -1,0 +1,329 @@
+---
+title: "SET Analyses - NAVD88"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+    fig_width: 5.5
+    fig_height: 6
+  html_document:
+    code_folding: hide
+    keep_md: no
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+date: "`r Sys.Date()`"
+---
+
+__Initial RMD setup__
+<br>
+
+```{r setup_analyses, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+```
+
+__Loading libraries and data sets__
+<br>
+```{r importAndFormat_analyses}
+# open up important libraries
+library(tidyverse)
+library(lubridate)
+library(knitr)
+# library(broom)
+# library(agricolae)
+# library(gridExtra)
+# library(plotly)
+# library(EnvStats)
+library(RColorBrewer)
+# library(multcompView)
+# source("functions_sentinel_sites.R") # replaced by my personal package 'nerrSET'
+library(nerrSET)
+library(rcartocolor) # for Antique color palette
+library(pals)
+library(paletteer)
+
+# load the datasets
+load("SET_data_files.R")
+
+```
+
+__Note to self about figure sizes__: When fiddling with graphics in the console, execute `windows()` to open up a new graphics device; then run the code for the plot; resize with the mouse; then find the dimensions by typing `dev.size("in")`.
+
+<br>
+
+
+# Add NAVD88 information into the SET data frame  
+
+There is a spreadsheet called 'NAVD88.csv' that has NAVD88 elevations of each SET table in it. These were derived from _[duration]_ RTK occupations on _[some date]_. (2011?)
+
+The data frame we want to work with here is `sets_long`. Here is the top of that data frame:
+<br>
+```{r}
+kable(head(sets_long))
+```
+
+<br>
+
+## Read in NAVD88 data  
+
+Here we read in and look at the head of the NAVD88 sheet:
+<br>
+```{r}
+navd88 <- read.csv("NAVD88.csv")
+kable(head(navd88))
+```
+
+<br>
+
+## Calculate NAVD88 offset for each SET, then NAVD88-adjusted surface elevations  
+
+<br>
+A correction factor can be calculated as: `SET_NAVD88 + Adapter_NAVD88 - 0.756`  
+
+0.756m is the length of the pins used to measure surface elevation.  
+
+Here I use the above formula to calculate an offset for each SET, and add it into the `navd88` data frame. I then add the calculated _offset_ value into the `sets_long` data frame, and subtract it from the pin value (which has been converted to meters), to calculate a navd88-adjusted surface elevation, named *elevation_navd88*.
+
+<br>
+```{r}
+navd88 <- navd88 %>%
+    mutate(offset = SET_NAVD88 + Adapter_NAVD88 - 0.756)
+kable(head(navd88))
+
+sets_long_navd88 <- left_join(sets_long, navd88, by = c("SET" = "Site")) %>%
+    select(-SET_NAVD88, -Adapter_NAVD88) %>%
+    mutate(value_m = value/1000,
+           elevation_navd88 = value_m + offset)
+kable(head(sets_long_navd88))
+```
+
+<br>
+
+### Quick plots to see what's going on  
+
+There has been no aggregation yet - this is all 36 pins per SET.  
+<br>
+
+```{r, fig.width = 6.35, height = 8.35}
+# ggplot(sets_long_navd88) +
+#     geom_point(aes(x = date, y = elevation_navd88, color = SET)) +
+#     theme_minimal() +
+#     ggtitle("NAVD-88 adjusted pin heights")
+```
+
+<br>
+Facet by site to zoom in a bit.
+<br>
+```{r, fig.width = 7.1, fig.height = 8.2}
+# ggplot(sets_long_navd88) +
+#     geom_point(aes(x = date, y = elevation_navd88, color = SET)) +
+#     facet_wrap(~SET, ncol = 3, scales = "free_y") +
+#     theme_minimal() +
+#     ggtitle("NAVD-88 adjusted pin heights")    
+```
+
+<br>
+<br>
+
+# Aggregate by SET  
+
+Here I'm averaging all 36 pins within a SET to get a single, NAVD-88 adjusted, mean elevation for the SET on each date.
+<br>
+
+```{r}
+sets_navd88_mean <- sets_long_navd88 %>%
+    group_by(SET, date) %>%
+    summarize(elevation_mean = mean(elevation_navd88, na.rm = TRUE))
+kable(head(sets_navd88_mean))
+```
+
+< br>
+Another plot to see how it looks now:
+<br>
+```{r, fig.width = 4.667, fig.height = 8}
+# ggplot(sets_navd88_mean) +
+#     geom_point(aes(x = date, y = elevation_mean, color = SET)) +
+#     theme_minimal() +
+#     ggtitle("NAVD88-adjusted mean surface elevation by SET")
+```
+
+<br>
+<br>
+
+## Add in column for site
+<br>
+
+This is where my `nerrSET` package comes in.
+
+```{r}
+sets_navd88_mean <- attach_site_names(sets_navd88_mean)
+sets_navd88_mean <- mutate(sets_navd88_mean, site = fct_relevel(site, "CLMA", "PANN", "JUUP", "JULO", "SPAL"))
+               
+```
+
+# Graphing with different color palettes  
+
+```{r}
+p <- ggplot(sets_navd88_mean) +
+    geom_point(aes(x = date, 
+                   y = elevation_mean, 
+                   color = site,
+                   shape = site), 
+               size = 2, 
+               alpha = 0.7) +
+    # theme_minimal() +
+    ggtitle("NAVD88-adjusted mean surface elevation by SET") + 
+    # scale_y_continuous(limits = c(0.05, 0.45)) + 
+    geom_smooth(aes(x = date, 
+                    y = elevation_mean, 
+                    color = site), 
+                method = "lm", 
+                # lty = 2,
+                alpha = 0.6,
+                lwd = 1,
+                se = FALSE) +
+    scale_shape_manual(values = c(16, 17, 16, 6, 15)) + 
+    theme(axis.line = element_line(colour = "gray20", 
+                                   size = 0.5, linetype = "solid"), 
+          panel.grid.major = element_line(linetype = "blank"), 
+          panel.grid.minor = element_line(linetype = "blank"), 
+          panel.background = element_rect(fill = NA), 
+          legend.key = element_rect(fill = NA), 
+          legend.background = element_rect(fill = NA))
+
+```
+
+\newpage
+
+## ggplot2 default  
+
+```{r}
+p
+```
+
+\newpage
+
+## RCartoColor  
+
+### Antique, but from paletteer package  
+
+```{r}
+p + scale_color_paletteer_d(rcartocolor, Antique)
+```
+
+
+\newpage
+
+### Prism, from paletteer package  
+
+```{r}
+p + scale_color_paletteer_d(rcartocolor, Prism)
+```
+
+\newpage
+
+## RColorBrewer  
+
+### YlGnBu  
+
+```{r}
+p + scale_color_manual(values = brewer.pal(9, "YlGnBu")[4:8])
+```
+\newpage
+
+### PuBuGn  
+
+```{r}
+p + scale_color_manual(values = brewer.pal(9, "PuBuGn")[4:8])
+```
+\newpage
+
+### PuBu  
+
+```{r}
+p + scale_color_manual(values = brewer.pal(9, "PuBu")[4:8])
+```
+
+\newpage
+### GnBu  
+
+```{r}
+p + scale_color_manual(values = brewer.pal(9, "GnBu")[4:8])
+```
+
+\newpage
+### Greens  
+
+```{r}
+p + scale_color_manual(values = brewer.pal(9, "Greens")[4:8])
+```
+
+
+\newpage
+### Greys  
+
+```{r}
+p + scale_color_manual(values = brewer.pal(9, "Greys")[4:8])
+```
+
+\newpage
+### OrRd  
+
+```{r}
+p + scale_color_manual(values = brewer.pal(9, "OrRd")[4:8])
+```
+
+\newpage
+### Reds  
+
+```{r}
+p + scale_color_manual(values = brewer.pal(9, "Reds")[4:8])
+```
+
+\newpage
+### YlOrBr  
+
+```{r}
+p + scale_color_manual(values = brewer.pal(9, "YlOrBr")[4:8])
+```
+
+\newpage
+
+## pals  
+
+### tol  
+
+```{r}
+p + scale_color_paletteer_d(pals, tol)
+```
+\newpage
+
+## cartography  
+
+### multi.pal  
+
+```{r}
+p + scale_color_paletteer_d(cartography, multi.pal, dynamic = TRUE)
+```
+\newpage
+
+### blue.pal  
+
+```{r}
+p + scale_color_paletteer_d(cartography, blue.pal, dynamic = TRUE)
+```
+
+\newpage
+### green.pal  
+
+```{r}
+p + scale_color_paletteer_d(cartography, green.pal, dynamic = TRUE)
+```
+\newpage
+### harmo.pal  
+
+```{r}
+p + scale_color_paletteer_d(cartography, harmo.pal, dynamic = TRUE)
+```
